@@ -6,6 +6,7 @@ import {
   TenantAccount,
   UserRole,
 } from '../types/order';
+import { getSupabaseClient } from './supabaseClient';
 
 const SUPABASE_CONFIG_KEY = 'facasflow_supabase_config_v1';
 export const CLIENT_INSTANCE_ID = `client_${Math.random().toString(36).slice(2, 10)}`;
@@ -152,7 +153,7 @@ export function publishRealtimeUpdate(params: {
     // ignore
   }
 
-  // 3. Supabase Broadcast (skip full-blob upsert for single-card moves)
+  // 3. Supabase Broadcast (real-time event across devices)
   try {
     if (activeSupabaseChannel) {
       activeSupabaseChannel.send({
@@ -160,22 +161,6 @@ export function publishRealtimeUpdate(params: {
         event: 'facasflow_sync',
         payload: event,
       });
-    }
-    if (activeSupabaseClient && params.db && !params.order) {
-      activeSupabaseClient
-        .from('facasflow_tenant_state')
-        .upsert(
-          {
-            company_id: params.company_id,
-            db_payload: params.db,
-            updated_at: event.timestamp,
-            last_action: params.actionLabel,
-            last_actor: params.actorName,
-          },
-          { onConflict: 'company_id' }
-        )
-        .then(() => {})
-        .catch(() => {});
     }
   } catch {
     // ignore
@@ -285,144 +270,120 @@ export function subscribeToCompanyRealtime(
     }
   }
 
-  // 4. Supabase Realtime Channel (normalized orders changes + broadcast)
-  const supaCfg = getSupabaseConfig();
-  if (supaCfg.enabled && supaCfg.url.trim() && supaCfg.anonKey.trim()) {
-    const dynamicImport = new Function('url', 'return import(url)');
-    dynamicImport('https://esm.sh/@supabase/supabase-js@2.47.10')
-      .then((mod: any) => {
-        if (isDisposed) return;
-        const createClient = mod.createClient;
-        const client = createClient(supaCfg.url.trim(), supaCfg.anonKey.trim(), {
-          realtime: { params: { eventsPerSecond: 20 } },
-        });
-        localSupabaseClient = client;
-        activeSupabaseClient = client;
+  // 4. Supabase Realtime Channel (ordens_servico changes + broadcast)
+  try {
+    const client = getSupabaseClient();
+    localSupabaseClient = client;
+    activeSupabaseClient = client;
 
-        if (activeSupabaseChannel) {
-          try {
-            client.removeChannel(activeSupabaseChannel);
-          } catch {
-            // ignore
-          }
-          activeSupabaseChannel = null;
+    if (activeSupabaseChannel) {
+      try {
+        client.removeChannel(activeSupabaseChannel);
+      } catch {
+        // ignore
+      }
+      activeSupabaseChannel = null;
+    }
+
+    const channel = client
+      .channel(`facasflow_company_${company_id}`, {
+        config: { broadcast: { self: false } },
+      })
+      .on('broadcast', { event: 'facasflow_sync' }, (payload: any) => {
+        if (payload?.payload) {
+          handleIncoming(payload.payload);
         }
-
-        const channel = client
-          .channel(`facasflow_company_${company_id}`, {
-            config: { broadcast: { self: false } },
-          })
-          .on('broadcast', { event: 'facasflow_sync' }, (payload: any) => {
-            if (payload?.payload) {
-              handleIncoming(payload.payload);
-            }
-          })
-          .on('broadcast', { event: 'facasflow_sync_request' }, (payload: any) => {
-            if (isDisposed || !getLocalSnapshotForPeer) return;
-            const req = payload?.payload;
-            const requesterId = req?.requesterId;
-            if (
-              !requesterId ||
-              requesterId === CLIENT_INSTANCE_ID ||
-              req?.company_id !== company_id ||
-              repliedRequesters.has(requesterId)
-            ) {
-              return;
-            }
-            repliedRequesters.add(requesterId);
-            if (repliedRequesters.size > 50) {
-              const first = repliedRequesters.values().next().value;
-              if (first) repliedRequesters.delete(first);
-            }
-            const snap = getLocalSnapshotForPeer();
-            if (snap && Array.isArray(snap.orders) && snap.orders.length > 0) {
-              channel.send({
-                type: 'broadcast',
-                event: 'facasflow_sync',
-                payload: {
-                  eventId: `peer_sync_${CLIENT_INSTANCE_ID}_${requesterId}`,
-                  senderInstanceId: CLIENT_INSTANCE_ID,
-                  company_id,
-                  section: 'all',
-                  actionLabel: '',
-                  actorName: '',
-                  actorRole: 'admin',
-                  timestamp: new Date().toISOString(),
-                  db: snap,
-                } as RealtimeSyncEvent,
-              });
-            }
-          })
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'orders',
-              filter: `company_id=eq.${company_id}`,
-            },
-            (change: any) => {
-              const row = change?.new;
-              if (row && row.id && row.stage) {
-                handleIncoming({
-                  eventId: `pg_order_${row.id}_v${row.version || row.updated_at || Date.now()}`,
-                  company_id,
-                  section: 'esteira',
-                  actionLabel: '',
-                  actorName: '',
-                  actorRole: 'operador',
-                  timestamp: row.updated_at || new Date().toISOString(),
-                  order: {
-                    id: row.id,
-                    company_id: row.company_id,
-                    companyId: row.client_company_id || '',
-                    companyName: row.company_name || '',
-                    companyPhone: row.company_phone || '',
-                    toolDescription: row.tool_description || '',
-                    amount: Number(row.amount) || 0,
-                    paymentModality: row.payment_modality,
-                    paymentStatus: row.payment_status,
-                    stage: row.stage,
-                    stageUpdatedAt: row.stage_updated_at || '',
-                    stageHistory: [],
-                    version: Number(row.version) || 1,
-                    updatedAt: row.updated_at || new Date().toISOString(),
-                    createdAt: row.created_at || '',
-                    dueDate: row.due_date || '',
-                    paidAt: row.paid_at || undefined,
-                  },
-                });
-              }
-            }
-          )
-          .subscribe((status: string) => {
-            if (status === 'SUBSCRIBED' && !isDisposed) {
-              onConnectionStatusChange?.('supabase_live');
-              channel.send({
-                type: 'broadcast',
-                event: 'facasflow_sync_request',
-                payload: {
-                  requesterId: CLIENT_INSTANCE_ID,
-                  company_id,
-                },
-              });
-            }
-          });
-
-        if (isDisposed) {
-          try {
-            client.removeChannel(channel);
-          } catch {
-            // ignore
-          }
+      })
+      .on('broadcast', { event: 'facasflow_sync_request' }, (payload: any) => {
+        if (isDisposed || !getLocalSnapshotForPeer) return;
+        const req = payload?.payload;
+        const requesterId = req?.requesterId;
+        if (
+          !requesterId ||
+          requesterId === CLIENT_INSTANCE_ID ||
+          req?.company_id !== company_id ||
+          repliedRequesters.has(requesterId)
+        ) {
           return;
         }
-        localSupabaseChannel = channel;
-        activeSupabaseChannel = channel;
+        repliedRequesters.add(requesterId);
+        if (repliedRequesters.size > 50) {
+          const first = repliedRequesters.values().next().value;
+          if (first) repliedRequesters.delete(first);
+        }
+        const snap = getLocalSnapshotForPeer();
+        if (snap && Array.isArray(snap.orders) && snap.orders.length > 0) {
+          channel.send({
+            type: 'broadcast',
+            event: 'facasflow_sync',
+            payload: {
+              eventId: `peer_sync_${CLIENT_INSTANCE_ID}_${requesterId}`,
+              senderInstanceId: CLIENT_INSTANCE_ID,
+              company_id,
+              section: 'all',
+              actionLabel: '',
+              actorName: '',
+              actorRole: 'admin',
+              timestamp: new Date().toISOString(),
+              db: snap,
+            } as RealtimeSyncEvent,
+          });
+        }
       })
-      .catch(() => {
-        // Fallback to local channels
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ordens_servico',
+          filter: `empresa_id=eq.${company_id}`,
+        },
+        (change: any) => {
+          const row = change?.new;
+          if (row && row.id && row.etapa && !row.deleted_at) {
+            handleIncoming({
+              eventId: `pg_order_${row.id}_v${row.version || row.updated_at || Date.now()}`,
+              company_id,
+              section: 'esteira',
+              actionLabel: '',
+              actorName: '',
+              actorRole: 'operador',
+              timestamp: row.updated_at || new Date().toISOString(),
+              order: {
+                id: row.numero_os || row.id,
+                dbUuid: row.id,
+                company_id: row.empresa_id,
+                companyId: row.cliente_codigo_legado || row.cliente_empresa_id || '',
+                companyUuid: row.cliente_empresa_id || undefined,
+                companyName: row.cliente_nome || '',
+                companyPhone: row.cliente_telefone || '',
+                toolDescription: row.descricao_ferramenta || '',
+                amount: Number(row.valor) || 0,
+                paymentModality: row.forma_pagamento,
+                paymentStatus: row.status_pagamento,
+                stage: row.etapa,
+                stageUpdatedAt: row.etapa_atualizada_em || '',
+                stageHistory: Array.isArray(row.historico_etapas) ? row.historico_etapas : [],
+                version: Number(row.version) || 1,
+                updatedAt: row.updated_at || new Date().toISOString(),
+                createdAt: String(row.created_at || '').slice(0, 10),
+                dueDate: String(row.data_vencimento || '').slice(0, 10),
+                paidAt: row.data_pagamento ? String(row.data_pagamento).slice(0, 10) : undefined,
+              },
+            });
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === 'SUBSCRIBED' && !isDisposed) {
+          onConnectionStatusChange?.('supabase_live');
+        }
       });
+
+    localSupabaseChannel = channel;
+    activeSupabaseChannel = channel;
+  } catch {
+    // Fallback to local BroadcastChannel / SSE
   }
 
   return () => {

@@ -3,8 +3,7 @@ import {
   AlertCircle,
   Check,
   Copy,
-  Eye,
-  KeyRound,
+  Loader2,
   Lock,
   Mail,
   Shield,
@@ -26,10 +25,9 @@ interface TeamManagementSectionProps {
     password: string;
     role: UserRole;
     jobTitle: string;
-  }) => { error?: string };
-  onToggleEmployeeRole: (email: string, nextRole: UserRole) => void;
-  onDeleteEmployee: (email: string) => void;
-  onImpersonateEmployee: (employee: TenantAccount) => void;
+  }) => Promise<{ error?: string }>;
+  onToggleEmployeeRole: (memberId: string, nextRole: UserRole) => Promise<void>;
+  onDeleteEmployee: (memberId: string) => Promise<void>;
 }
 
 export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
@@ -38,7 +36,6 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
   onAddEmployee,
   onToggleEmployeeRole,
   onDeleteEmployee,
-  onImpersonateEmployee,
 }) => {
   const [ownerName, setOwnerName] = useState('');
   const [email, setEmail] = useState('');
@@ -46,51 +43,54 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
   const [jobTitle, setJobTitle] = useState('');
   const [role, setRole] = useState<UserRole>('operador');
   const [formError, setFormError] = useState<string | null>(null);
-  const [confirmDeleteEmail, setConfirmDeleteEmail] = useState<string | null>(
-    null
-  );
+  const [submitting, setSubmitting] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setFormError(null);
-    const res = onAddEmployee({
-      ownerName: ownerName.trim(),
-      email: email.trim().toLowerCase(),
-      password: password.trim(),
-      role,
-      jobTitle:
-        jobTitle.trim() ||
-        (role === 'operador' ? 'Operador de Produção' : 'Administrador'),
-    });
-    if (res.error) {
-      setFormError(res.error);
-      return;
+    setSubmitting(true);
+    try {
+      const res = await onAddEmployee({
+        ownerName: ownerName.trim(),
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+        role,
+        jobTitle:
+          jobTitle.trim() ||
+          (role === 'operador' ? 'Operador de Produção' : 'Administrador'),
+      });
+      if (res.error) {
+        setFormError(res.error);
+        return;
+      }
+      setOwnerName('');
+      setEmail('');
+      setPassword('');
+      setJobTitle('');
+      setRole('operador');
+    } finally {
+      setSubmitting(false);
     }
-    setOwnerName('');
-    setEmail('');
-    setPassword('');
-    setJobTitle('');
-    setRole('operador');
   };
 
-  const handleCopyMobileInviteLink = (emp: TenantAccount) => {
+  const handleCopyAccessInfo = async (emp: TenantAccount) => {
     try {
-      const token = window.btoa(
-        unescape(encodeURIComponent(JSON.stringify(emp)))
-      );
       const baseUrl = `${window.location.origin}${window.location.pathname}`;
-      const inviteUrl = `${baseUrl}?emp_sync=${encodeURIComponent(token)}`;
-      navigator.clipboard.writeText(inviteUrl);
+      const text = `FacasFlow — Acesso (${session.companyName})\nURL: ${baseUrl}\nE-mail: ${emp.email}`;
+      await navigator.clipboard.writeText(text);
       setCopiedEmail(emp.email);
       setTimeout(() => setCopiedEmail(null), 2500);
     } catch {
-      // ignore
+      // ignore clipboard restriction
     }
   };
 
   const inputClass =
-    'liquid-glass-pill w-full px-3.5 py-2.5 rounded-2xl text-xs text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
+    'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 rounded-2xl text-base text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
     <div className="space-y-6">
@@ -253,10 +253,19 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3 px-4 rounded-full font-bold text-xs bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer mt-2 active:scale-95"
+                disabled={submitting}
+                className="w-full min-h-[44px] py-3 px-4 rounded-full font-bold text-xs bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer mt-2 active:scale-95 disabled:opacity-60"
               >
-                <UserPlus className="w-4 h-4" />
-                <span>Cadastrar Funcionário na Empresa</span>
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <UserPlus className="w-4 h-4" />
+                )}
+                <span>
+                  {submitting
+                    ? 'Cadastrando no Supabase...'
+                    : 'Cadastrar Funcionário na Empresa'}
+                </span>
               </button>
             </form>
           </div>
@@ -328,16 +337,8 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                         <span>•</span>
                         <span>
                           E-mail:{' '}
-                          <code className="text-slate-900 font-mono font-bold">
+                          <code className="text-slate-900 font-mono font-bold break-all">
                             {emp.email}
-                          </code>
-                        </span>
-                        <span>•</span>
-                        <span className="inline-flex items-center gap-1">
-                          <KeyRound className="w-3 h-3 text-slate-500" />
-                          Senha:{' '}
-                          <code className="text-slate-800 font-mono font-bold">
-                            {emp.password}
                           </code>
                         </span>
                       </div>
@@ -346,19 +347,19 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => handleCopyMobileInviteLink(emp)}
-                        className="liquid-glass-pill inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-slate-800 text-[11px] font-bold transition cursor-pointer"
-                        title="Copiar link de acesso configurado para o celular do funcionário"
+                        onClick={() => handleCopyAccessInfo(emp)}
+                        className="liquid-glass-pill min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-slate-800 text-xs font-bold transition cursor-pointer"
+                        title="Copiar endereço e e-mail de acesso"
                       >
                         {copiedEmail === emp.email ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="text-emerald-700">Link Copiado!</span>
+                            <Check className="w-4 h-4 text-emerald-600" />
+                            <span className="text-emerald-700">Copiado!</span>
                           </>
                         ) : (
                           <>
-                            <Copy className="w-3.5 h-3.5 text-slate-600" />
-                            <span>Link Celular</span>
+                            <Copy className="w-4 h-4 text-slate-600" />
+                            <span>Copiar Acesso</span>
                           </>
                         )}
                       </button>
@@ -366,28 +367,22 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                       {!isSelf && (
                         <button
                           type="button"
-                          onClick={() => onImpersonateEmployee(emp)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/15 hover:bg-indigo-600 text-indigo-800 hover:text-white border border-indigo-300/60 text-[11px] font-bold transition cursor-pointer"
-                          title="Entrar imediatamente com o perfil deste funcionário para testar a visão dele"
+                          disabled={busyId === emp.id}
+                          onClick={async () => {
+                            setBusyId(emp.id);
+                            try {
+                              await onToggleEmployeeRole(
+                                emp.id,
+                                isOperador ? 'admin' : 'operador'
+                              );
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          className="liquid-glass-pill min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-slate-700 text-xs font-bold transition cursor-pointer"
+                          title="Alternar entre Operador e Administrador"
                         >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Entrar como {emp.ownerName.split(' ')[0]}</span>
-                        </button>
-                      )}
-
-                      {!isSelf && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onToggleEmployeeRole(
-                              emp.email,
-                              isOperador ? 'admin' : 'operador'
-                            )
-                          }
-                          className="liquid-glass-pill inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-slate-700 text-[11px] font-bold transition cursor-pointer"
-                          title="Alternar entre Operador (Seções 2, 4, 5) e Administrador"
-                        >
-                          <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          <UserCheck className="w-4 h-4 text-indigo-600" />
                           <span>
                             {isOperador ? 'Tornar Admin' : 'Tornar Operador'}
                           </span>
@@ -395,22 +390,29 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                       )}
 
                       {!isSelf &&
-                        (confirmDeleteEmail === emp.email ? (
-                          <div className="inline-flex items-center gap-1 bg-rose-500/15 border border-rose-300/70 rounded-full px-2.5 py-1">
+                        (confirmDeleteId === emp.id ? (
+                          <div className="inline-flex items-center gap-1.5 bg-rose-500/15 border border-rose-300/70 rounded-full px-3 py-1">
                             <button
                               type="button"
-                              onClick={() => {
-                                onDeleteEmployee(emp.email);
-                                setConfirmDeleteEmail(null);
+                              disabled={busyId === emp.id}
+                              onClick={async () => {
+                                setBusyId(emp.id);
+                                try {
+                                  await onDeleteEmployee(emp.id);
+                                  setConfirmDeleteId(null);
+                                } finally {
+                                  setBusyId(null);
+                                }
                               }}
-                              className="text-[10px] font-bold text-rose-800 hover:text-rose-950 px-1.5 cursor-pointer"
+                              className="min-h-[36px] text-xs font-bold text-rose-800 hover:text-rose-950 px-2 cursor-pointer"
                             >
                               Confirmar
                             </button>
                             <button
                               type="button"
-                              onClick={() => setConfirmDeleteEmail(null)}
-                              className="text-[10px] font-bold text-slate-600 hover:text-slate-900 px-1 cursor-pointer"
+                              onClick={() => setConfirmDeleteId(null)}
+                              aria-label="Cancelar exclusão"
+                              className="min-h-[36px] min-w-[36px] text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
                             >
                               ✕
                             </button>
@@ -418,11 +420,12 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteEmail(emp.email)}
-                            className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
+                            onClick={() => setConfirmDeleteId(emp.id)}
+                            aria-label="Apagar funcionário"
+                            className="min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center transition cursor-pointer"
                             title="Apagar funcionário"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         ))}
                     </div>
