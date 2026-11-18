@@ -13,6 +13,8 @@ const MODULE_FILES = [
   'types/order.ts',
   'utils/financeEngine.ts',
   'data/seedOrders.ts',
+  'services/supabaseClient.ts',
+  'services/supabaseDataService.ts',
   'services/storageAdapter.ts',
   'services/realtimeEngine.ts',
   'components/AuthLoginScreen.tsx',
@@ -20,6 +22,8 @@ const MODULE_FILES = [
   'components/BentoOverviewSection.tsx',
   'components/CompaniesCrmSection.tsx',
   'components/ProductionKanban.tsx',
+  'components/ResponsiveCategoryChart.tsx',
+  'components/ExpensesSection.tsx',
   'components/ExpensesSubsection.tsx',
   'components/CollaboratorsSubsection.tsx',
   'components/InvestmentsSubsection.tsx',
@@ -29,6 +33,7 @@ const MODULE_FILES = [
   'components/StockSection.tsx',
   'components/NotesSection.tsx',
   'components/TeamManagementSection.tsx',
+  'components/SettingsBackupsSection.tsx',
   'components/FastEntryModal.tsx',
   'App.tsx',
   'main.tsx',
@@ -83,12 +88,14 @@ function buildBundle() {
 import * as ReactNamespace from 'https://esm.sh/react@19.0.0';
 import { createRoot } from 'https://esm.sh/react-dom@19.0.0/client';
 import * as LucideIcons from 'https://esm.sh/lucide-react@0.468.0?deps=react@19.0.0';
+import * as SupabaseJs from 'https://esm.sh/@supabase/supabase-js@2.47.10';
 
 const React = ReactNamespace.default || ReactNamespace;
 const __externalModules = {
   'react': Object.assign({ default: React }, ReactNamespace),
   'react-dom/client': { createRoot, default: { createRoot } },
-  'lucide-react': LucideIcons
+  'lucide-react': LucideIcons,
+  '@supabase/supabase-js': Object.assign({ default: SupabaseJs }, SupabaseJs)
 };
 
 const __moduleFactories = {};
@@ -158,6 +165,7 @@ __require('.', './main');
     'types/order.ts',
     'utils/financeEngine.ts',
     'data/seedOrders.ts',
+    'services/supabaseClient.ts',
     'services/storageAdapter.ts',
     'services/realtimeEngine.ts',
     'admin/AdminSystemPanel.tsx',
@@ -197,12 +205,14 @@ __require('.', './main');
 import * as ReactNamespace from 'https://esm.sh/react@19.0.0';
 import { createRoot } from 'https://esm.sh/react-dom@19.0.0/client';
 import * as LucideIcons from 'https://esm.sh/lucide-react@0.468.0?deps=react@19.0.0';
+import * as SupabaseJs from 'https://esm.sh/@supabase/supabase-js@2.47.10';
 
 const React = ReactNamespace.default || ReactNamespace;
 const __externalModules = {
   'react': Object.assign({ default: React }, ReactNamespace),
   'react-dom/client': { createRoot, default: { createRoot } },
-  'lucide-react': LucideIcons
+  'lucide-react': LucideIcons,
+  '@supabase/supabase-js': Object.assign({ default: SupabaseJs }, SupabaseJs)
 };
 
 const __moduleFactories = {};
