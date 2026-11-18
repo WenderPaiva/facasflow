@@ -1,6 +1,8 @@
 import {
   DeliveryMethod,
   DieOrder,
+  ExpenseCategoryKey,
+  InvestmentType,
   PaymentModality,
   PaymentStatus,
   ProductionStage,
@@ -22,8 +24,8 @@ export const PRODUCTION_STAGES: {
     label: 'Arquivo Recebido',
     shortLabel: '1. Arquivo',
     subtitle: 'CAD / PDF / Amostra na triagem',
-    accentColor: 'border-zinc-700',
-    dotClass: 'bg-zinc-400',
+    accentColor: 'border-white/70',
+    dotClass: 'bg-slate-400',
   },
   {
     id: 'desenho_produzido',
@@ -31,8 +33,8 @@ export const PRODUCTION_STAGES: {
     label: 'Desenho Produzido',
     shortLabel: '2. Desenho CAD',
     subtitle: 'EngView / Projeto técnico pronto',
-    accentColor: 'border-rose-900/60',
-    dotClass: 'bg-rose-400',
+    accentColor: 'border-indigo-300/70',
+    dotClass: 'bg-indigo-500',
   },
   {
     id: 'faca_serrada',
@@ -40,8 +42,8 @@ export const PRODUCTION_STAGES: {
     label: 'Faca Serrada',
     shortLabel: '3. Serrada / Laser',
     subtitle: 'Madeira cortada e calada',
-    accentColor: 'border-amber-500/40',
-    dotClass: 'bg-amber-400',
+    accentColor: 'border-sky-300/70',
+    dotClass: 'bg-sky-500',
   },
   {
     id: 'faca_dobrada',
@@ -49,8 +51,8 @@ export const PRODUCTION_STAGES: {
     label: 'Faca Dobrada',
     shortLabel: '4. Lâmina Dobrada',
     subtitle: 'Lâminas de corte e vinco conformadas',
-    accentColor: 'border-orange-500/40',
-    dotClass: 'bg-orange-400',
+    accentColor: 'border-purple-300/70',
+    dotClass: 'bg-purple-500',
   },
   {
     id: 'faca_ajustada',
@@ -58,8 +60,8 @@ export const PRODUCTION_STAGES: {
     label: 'Faca Ajustada',
     shortLabel: '5. Ajustada / Borracha',
     subtitle: 'Cravação, esquadro e emborrachamento',
-    accentColor: 'border-rose-600/50',
-    dotClass: 'bg-rose-500',
+    accentColor: 'border-amber-300/70',
+    dotClass: 'bg-amber-500',
   },
   {
     id: 'faca_pronta',
@@ -67,7 +69,7 @@ export const PRODUCTION_STAGES: {
     label: 'Faca Pronta',
     shortLabel: '6. Faca Pronta',
     subtitle: 'Liberada para expedição / entrega',
-    accentColor: 'border-emerald-500/50',
+    accentColor: 'border-emerald-300/70',
     dotClass: 'bg-emerald-500',
   },
 ];
@@ -83,41 +85,90 @@ export const PAYMENT_MODALITY_META: Record<
   }
 > = {
   pix: {
-    label: 'PIX',
-    short: 'PIX',
-    colorHex: '#10b981', // emerald-500
-    badgeClass: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    label: 'Pix',
+    short: 'Pix',
+    colorHex: '#10b981', // verde-água
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-400/50',
     defaultDays: 0,
   },
-  a_prazo: {
-    label: 'A Prazo - 30/60d',
-    short: 'A Prazo 30/60d',
-    colorHex: '#e11d48', // crimson / rose-600
-    badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+  boleto: {
+    label: 'Boleto (15/30)',
+    short: 'Boleto (15/30)',
+    colorHex: '#4f46e5', // azul
+    badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-400/50',
     defaultDays: 30,
   },
   dinheiro: {
     label: 'Dinheiro',
     short: 'Dinheiro',
-    colorHex: '#22c55e', // green-500
-    badgeClass: 'bg-green-500/15 text-green-400 border-green-500/30',
+    colorHex: '#22c55e', // verde
+    badgeClass: 'bg-green-500/15 text-green-800 border-green-400/50',
     defaultDays: 0,
   },
   cartao: {
     label: 'Cartão',
     short: 'Cartão',
-    colorHex: '#f59e0b', // amber-500
-    badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    colorHex: '#f59e0b', // laranja
+    badgeClass: 'bg-amber-500/15 text-amber-800 border-amber-400/50',
     defaultDays: 2,
   },
-  cortesia: {
-    label: 'Cortesia / Não Paga',
-    short: 'Cortesia / Garantia',
-    colorHex: '#71717a', // zinc-500
-    badgeClass: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+  nao_pago: {
+    label: 'Não Pago',
+    short: 'Não Pago',
+    colorHex: '#64748b', // cinza
+    badgeClass: 'bg-white/60 text-slate-700 border-white/80',
     defaultDays: 0,
   },
 };
+
+export const EXPENSE_CATEGORIES: { key: ExpenseCategoryKey; label: string }[] = [
+  { key: 'aluguel', label: 'Aluguel' },
+  { key: 'agua', label: 'Água' },
+  { key: 'energia', label: 'Energia' },
+  { key: 'internet', label: 'Internet' },
+  { key: 'alimentacao', label: 'Alimentação' },
+  { key: 'combustivel', label: 'Combustível' },
+  { key: 'manutencao', label: 'Manutenção' },
+  { key: 'contador', label: 'Contador' },
+  { key: 'marketing', label: 'Marketing' },
+  { key: 'financiamento', label: 'Financiamento' },
+];
+
+export const INVESTMENT_TYPE_META: Record<InvestmentType, { label: string }> = {
+  renda_fixa: { label: 'Renda Fixa' },
+  acoes: { label: 'Ações' },
+  fii: { label: 'Fundos Imobiliários' },
+  outro: { label: 'Outro' },
+};
+
+export function createEmptyExpensesMap(): Record<ExpenseCategoryKey, number> {
+  return {
+    aluguel: 0,
+    agua: 0,
+    energia: 0,
+    internet: 0,
+    alimentacao: 0,
+    combustivel: 0,
+    manutencao: 0,
+    contador: 0,
+    marketing: 0,
+    financiamento: 0,
+  };
+}
+
+export function formatCurrencyMask(value: number): string {
+  const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+  return new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(safe);
+}
+
+export function parseCurrencyMask(rawInput: string): number {
+  const digits = rawInput.replace(/\D/g, '');
+  if (!digits) return 0;
+  return Number(digits) / 100;
+}
 
 export const DELIVERY_METHOD_META: Record<
   DeliveryMethod,
@@ -125,19 +176,19 @@ export const DELIVERY_METHOD_META: Record<
 > = {
   cliente_buscou: {
     label: 'Cliente Veio Buscar',
-    badgeClass: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-400/50',
   },
   uber_flash: {
     label: 'Enviado por Uber Flash',
-    badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-400/50',
   },
   entregador_proprio: {
     label: 'Entregador Próprio',
-    badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    badgeClass: 'bg-amber-500/15 text-amber-800 border-amber-400/50',
   },
   portador: {
     label: 'Retirado por Portador',
-    badgeClass: 'bg-zinc-800 text-zinc-300 border-zinc-700',
+    badgeClass: 'bg-white/60 text-slate-700 border-white/80',
   },
 };
 
@@ -147,19 +198,19 @@ export const RETURN_STATUS_META: Record<
 > = {
   em_analise: {
     label: 'Em Análise',
-    badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    dotClass: 'bg-amber-400',
+    badgeClass: 'bg-amber-500/15 text-amber-800 border-amber-400/50',
+    dotClass: 'bg-amber-500',
     next: 'em_ajuste',
   },
   em_ajuste: {
     label: 'Em Ajuste de Bancada',
-    badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    badgeClass: 'bg-rose-500/15 text-rose-800 border-rose-400/50',
     dotClass: 'bg-rose-500',
     next: 'liberado',
   },
   liberado: {
     label: 'Liberado Novamente',
-    badgeClass: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-400/50',
     dotClass: 'bg-emerald-500',
   },
 };
@@ -225,17 +276,54 @@ export function getPrevStage(current: ProductionStage): ProductionStage | null {
   return PRODUCTION_STAGES[idx - 1].id;
 }
 
-export function normalizeOrderPaymentStatus(order: DieOrder): DieOrder {
-  if (order.paymentModality === 'cortesia') {
-    return { ...order, paymentStatus: 'cortesia' };
+export function migratePaymentModality(raw: string): PaymentModality {
+  const normalized = String(raw || '').trim().toLowerCase();
+  if (normalized === 'pix') return 'pix';
+  if (normalized === 'a_prazo' || normalized === 'a prazo' || normalized === 'boleto') {
+    return 'boleto';
   }
-  if (order.paymentStatus === 'pago' || order.paymentStatus === 'sem_nota') {
+  if (normalized === 'dinheiro') return 'dinheiro';
+  if (normalized === 'cartao' || normalized === 'cartão') return 'cartao';
+  if (
+    normalized === 'cortesia' ||
+    normalized === 'nao_pago' ||
+    normalized === 'não pago'
+  ) {
+    return 'nao_pago';
+  }
+  return 'boleto';
+}
+
+export function normalizeOrderPaymentStatus(order: DieOrder): DieOrder {
+  const rawMod = String((order as any).paymentModality || '');
+  const isLegacyCortesiaWithValue =
+    rawMod.trim().toLowerCase() === 'cortesia' && (Number(order.amount) || 0) > 0;
+  if (isLegacyCortesiaWithValue) {
+    console.warn(
+      `[FacasFlow Migration] Registro de cortesia com valor detectado (${order.id}: ${order.amount}); migração automática ignorada para revisão manual.`
+    );
     return order;
+  }
+
+  const migratedModality = migratePaymentModality(rawMod);
+  const migratedStatus =
+    String((order as any).paymentStatus || '').toLowerCase() === 'cortesia'
+      ? 'nao_pago'
+      : order.paymentStatus;
+
+  if (migratedModality === 'nao_pago') {
+    return { ...order, paymentModality: migratedModality, paymentStatus: 'nao_pago' };
+  }
+  if (migratedStatus === 'pago' || migratedStatus === 'sem_nota') {
+    return { ...order, paymentModality: migratedModality, paymentStatus: migratedStatus };
   }
   const diff = getDaysDiff(order.dueDate);
   const nextStatus: PaymentStatus = diff < 0 ? 'vencido' : 'a_receber';
-  if (nextStatus === order.paymentStatus) return order;
-  return { ...order, paymentStatus: nextStatus };
+  return {
+    ...order,
+    paymentModality: migratedModality,
+    paymentStatus: nextStatus,
+  };
 }
 
 export interface FinancialBreakdown {
@@ -271,10 +359,10 @@ export function computeFinancialBreakdown(orders: DieOrder[]): FinancialBreakdow
 
   const modalityTotals: Record<PaymentModality, { amount: number; count: number }> = {
     pix: { amount: 0, count: 0 },
-    a_prazo: { amount: 0, count: 0 },
+    boleto: { amount: 0, count: 0 },
     dinheiro: { amount: 0, count: 0 },
     cartao: { amount: 0, count: 0 },
-    cortesia: { amount: 0, count: 0 },
+    nao_pago: { amount: 0, count: 0 },
   };
 
   for (const raw of orders) {
@@ -340,9 +428,9 @@ export function buildPixClipboardSnippet(order: DieOrder): string {
     `QUALIFACAS CORTE E VINCO - ${order.id}\n` +
     `Empresa: ${order.companyName}\n` +
     `Ferramenta: ${order.toolDescription}\n` +
-    `Valor: ${formatBRL(order.amount)} (${PAYMENT_MODALITY_META[order.paymentModality]?.short})\n` +
+    `Valor: ${formatBRL(order.amount)} - ${PAYMENT_MODALITY_META[order.paymentModality]?.short}\n` +
     `Vencimento: ${formatDateBR(order.dueDate)}\n` +
-    `Chave PIX (CNPJ): 14.528.910/0001-42`
+    `Chave Pix CNPJ: 14.528.910/0001-42`
   );
 }
 
@@ -377,4 +465,49 @@ export function buildWhatsAppBillingUrl(order: DieOrder): string {
   }
 
   return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+export function formatCnpjMask(raw: string): string {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 14);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  }
+  if (digits.length <= 12) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  }
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
+}
+
+export function isValidCNPJ(raw: string): boolean {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(digits)) return false;
+
+  const calcDigit = (slice: string, weights: number[]): number => {
+    let sum = 0;
+    for (let i = 0; i < weights.length; i += 1) {
+      sum += Number(slice[i]) * weights[i];
+    }
+    const rem = sum % 11;
+    return rem < 2 ? 0 : 11 - rem;
+  };
+
+  const d1 = calcDigit(digits.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  if (d1 !== Number(digits[12])) return false;
+
+  const d2 = calcDigit(digits.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return d2 === Number(digits[13]);
+}
+
+export function formatPhoneMask(raw: string): string {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 11);
+  if (digits.length === 0) return '';
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 }

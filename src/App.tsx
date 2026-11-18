@@ -1,16 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Plus, Radio } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 import { AuthLoginScreen } from './components/AuthLoginScreen';
 import { BentoOverviewSection } from './components/BentoOverviewSection';
 import { CompaniesCrmSection } from './components/CompaniesCrmSection';
 import { DeliveriesLogisticsSection } from './components/DeliveriesLogisticsSection';
 import { FastEntryModal } from './components/FastEntryModal';
 import { FinanceAnalyticsSection } from './components/FinanceAnalyticsSection';
-import { HeaderBar } from './components/HeaderBar';
+import { HeaderBar, LiquidSidebar } from './components/HeaderBar';
+import {
+  CanhotoSlipCard,
+  chunkNoteItems,
+  NotesSection,
+} from './components/NotesSection';
 import { ProductionKanban } from './components/ProductionKanban';
+import { StockSection } from './components/StockSection';
 import { TeamManagementSection } from './components/TeamManagementSection';
 import { WarrantyReturnsSection } from './components/WarrantyReturnsSection';
 import {
+  getActiveRealtimeChannelCount,
+  isSupabaseCloudActive,
+  moveOrderStageViaRpc,
   publishRealtimeUpdate,
   subscribeToCompanyRealtime,
 } from './services/realtimeEngine';
@@ -20,12 +29,19 @@ import {
   getActiveSession,
   getCompanyEmployees,
   getNextDeliveryId,
+  getNextInvestmentId,
+  getNextNoteNumber,
   getNextOrderId,
+  getNextPayrollEmployeeId,
+  getNextProviderId,
   getNextReturnId,
+  getNextStockId,
   loadEnterpriseDatabase,
+  moveOrderStageOnServer,
   registerEmployeeForCompany,
   saveActiveSession,
   saveEnterpriseDatabase,
+  saveEnterpriseDatabaseLocalOnly,
   updateEmployeeRoleInCompany,
 } from './services/storageAdapter';
 import {
@@ -35,10 +51,16 @@ import {
   DeliveryRecord,
   DieOrder,
   EnterpriseDatabase,
+  ExpenseCategoryKey,
+  InvestmentRecord,
+  NoteRecord,
   PaymentModality,
   PaymentStatus,
+  PayrollEmployeeRecord,
   ProductionStage,
   ReturnStatus,
+  ServiceProviderRecord,
+  StockItem,
   TenantAccount,
   UserRole,
   WarrantyReturnRecord,
@@ -56,6 +78,8 @@ const OPERATOR_ALLOWED_SECTIONS: ActiveSection[] = [
   'esteira',
   'entregas',
   'retornos',
+  'estoque',
+  'notas',
 ];
 
 export const App: React.FC = () => {
@@ -85,35 +109,82 @@ export const App: React.FC = () => {
   const [prefillDeliveryOrder, setPrefillDeliveryOrder] =
     useState<DieOrder | null>(null);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [printJob, setPrintJob] = useState<{
+    note: NoteRecord;
+    threePerPage: boolean;
+  } | null>(null);
+  const [pendingOrderIds, setPendingOrderIds] = useState<string[]>([]);
+  const pendingOrderIdsRef = useRef<Set<string>>(new Set());
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     message: string;
-    isRealtime?: boolean;
   } | null>(null);
 
-  const showToast = (message: string, isRealtime = false) => {
-    setToast({ message, isRealtime });
+  const showToast = (message: string) => {
+    setToast({ message });
     setTimeout(() => {
       setToast((prev) => (prev?.message === message ? null : prev));
     }, 3800);
   };
 
-  // Subscribe to Realtime updates for the logged-in company_id (Sections 2, 4, 5 & Team)
+  const isNewerOrder = (incoming: DieOrder, local?: DieOrder): boolean => {
+    if (!local) return true;
+    const incVer = Number(incoming.version) || 0;
+    const locVer = Number(local.version) || 0;
+    if (incVer > locVer) return true;
+    if (incVer < locVer) return false;
+    return (incoming.updatedAt || '') > (local.updatedAt || '');
+  };
+
+  // Subscribe to Realtime updates for the logged-in company_id (Read-only state merge; never writes back)
   useEffect(() => {
+    (window as any).__facasflowChannelCount = getActiveRealtimeChannelCount;
     if (!session?.company_id) return;
 
     const unsubscribe = subscribeToCompanyRealtime(
       session.company_id,
       (remoteEvent) => {
-        const saved = saveEnterpriseDatabase({
-          ...remoteEvent.db,
-          company_id: session.company_id,
+        setDb((prev) => {
+          let nextDb = prev;
+          if (remoteEvent.order) {
+            const incoming = remoteEvent.order;
+            if (pendingOrderIdsRef.current.has(incoming.id)) {
+              return prev;
+            }
+            const existing = prev.orders.find((o) => o.id === incoming.id);
+            if (existing && !isNewerOrder(incoming, existing)) {
+              return prev;
+            }
+            const nextOrders = existing
+              ? prev.orders.map((o) =>
+                  o.id === incoming.id ? { ...o, ...incoming } : o
+                )
+              : [incoming, ...prev.orders];
+            nextDb = saveEnterpriseDatabaseLocalOnly({
+              ...prev,
+              orders: nextOrders,
+            });
+          } else if (remoteEvent.db) {
+            const localOrderMap = new Map(prev.orders.map((o) => [o.id, o]));
+            const mergedOrders = (remoteEvent.db.orders || []).map((inc) => {
+              const loc = localOrderMap.get(inc.id);
+              if (loc && pendingOrderIdsRef.current.has(inc.id)) {
+                return loc;
+              }
+              if (loc && !isNewerOrder(inc, loc)) {
+                return loc;
+              }
+              return inc;
+            });
+            nextDb = saveEnterpriseDatabaseLocalOnly({
+              ...remoteEvent.db,
+              company_id: session.company_id,
+              orders: mergedOrders,
+            });
+          }
+          return nextDb;
         });
-        setDb(saved);
         setEmployees(getCompanyEmployees(session.company_id));
-        showToast(
-          `[Tempo Real] ${remoteEvent.actorName}: ${remoteEvent.actionLabel}`,
-          true
-        );
       },
       (status) => {
         setRealtimeStatus(status);
@@ -164,7 +235,7 @@ export const App: React.FC = () => {
   const commitDb = (
     nextDb: EnterpriseDatabase,
     realtimeMeta?: {
-      section: 'esteira' | 'entregas' | 'retornos' | 'equipe' | 'all';
+      section: 'esteira' | 'entregas' | 'retornos' | 'estoque' | 'notas' | 'financeiro' | 'equipe' | 'all';
       actionLabel: string;
     }
   ) => {
@@ -262,7 +333,7 @@ export const App: React.FC = () => {
     const days = PAYMENT_MODALITY_META[payload.paymentModality]?.defaultDays ?? 30;
 
     let payStatus: PaymentStatus = 'a_receber';
-    if (payload.paymentModality === 'cortesia') payStatus = 'cortesia';
+    if (payload.paymentModality === 'nao_pago') payStatus = 'nao_pago';
     else if (
       payload.paymentModality === 'pix' ||
       payload.paymentModality === 'dinheiro'
@@ -301,6 +372,8 @@ export const App: React.FC = () => {
       createdAt: today,
       dueDate: addDays(today, days),
       paidAt: payStatus === 'pago' ? today : undefined,
+      version: 1,
+      updatedAt: new Date().toISOString(),
     };
 
     const stageLabel =
@@ -325,32 +398,104 @@ export const App: React.FC = () => {
     showToast(`${newOrder.id} criada em "${stageLabel}"!`);
   };
 
-  // Seção 2 • Esteira Física de Produção (Realtime Broadcast)
-  const handleMoveStage = (orderId: string, targetStage: ProductionStage) => {
-    const stamp = nowTimestampBR();
-    const nextOrders = db.orders.map((o) => {
-      if (o.id !== orderId) return o;
-      return {
-        ...o,
+  // Seção 2 • Esteira Física de Produção (Única função responsável por mover o card)
+  const handleMoveStage = useCallback(
+    async (orderId: string, targetStage: ProductionStage) => {
+      if (!session) return;
+      const currentOrder = db.orders.find((o) => o.id === orderId);
+      if (!currentOrder || currentOrder.stage === targetStage) return;
+      if (pendingOrderIdsRef.current.has(orderId)) return;
+
+      const stamp = nowTimestampBR();
+      const nowIso = new Date().toISOString();
+      const previousOrder = { ...currentOrder };
+      const optimisticOrder: DieOrder = {
+        ...currentOrder,
         stage: targetStage,
         stageUpdatedAt: stamp,
         stageHistory: [
-          ...(o.stageHistory || []),
+          ...(currentOrder.stageHistory || []),
           { stage: targetStage, timestamp: stamp },
         ],
+        version: (Number(currentOrder.version) || 1) + 1,
+        updatedAt: nowIso,
       };
-    });
-    const stageName =
-      PRODUCTION_STAGES.find((s) => s.id === targetStage)?.label || targetStage;
-    commitDb(
-      { ...db, orders: nextOrders },
-      {
-        section: 'esteira',
-        actionLabel: `${orderId} avançou para "${stageName}" na Seção 2`,
+
+      // 1. Marcar pendente e aplicar atualização otimista apenas neste card
+      pendingOrderIdsRef.current.add(orderId);
+      setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
+      setMoveError(null);
+      setDb((prev) =>
+        saveEnterpriseDatabaseLocalOnly({
+          ...prev,
+          orders: prev.orders.map((o) => (o.id === orderId ? optimisticOrder : o)),
+        })
+      );
+
+      try {
+        let authoritativeOrder = optimisticOrder;
+
+        // 2. Escrita única via RPC (Supabase) ou endpoint atômico (server.cjs)
+        if (isSupabaseCloudActive()) {
+          const rpcRow = await moveOrderStageViaRpc(orderId, targetStage, stamp);
+          if (rpcRow) {
+            authoritativeOrder = {
+              ...optimisticOrder,
+              version: rpcRow.version ?? optimisticOrder.version,
+              updatedAt: rpcRow.updated_at ?? optimisticOrder.updatedAt,
+            };
+          }
+        } else {
+          const serverOrder = await moveOrderStageOnServer({
+            company_id: session.company_id,
+            orderId,
+            targetStage,
+            stageUpdatedAt: stamp,
+          });
+          if (serverOrder) {
+            authoritativeOrder = serverOrder;
+          }
+        }
+
+        // 3. Limpar estado pendente e confirmar registro final
+        pendingOrderIdsRef.current.delete(orderId);
+        setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
+        setDb((prev) =>
+          saveEnterpriseDatabaseLocalOnly({
+            ...prev,
+            orders: prev.orders.map((o) =>
+              o.id === orderId ? authoritativeOrder : o
+            ),
+          })
+        );
+
+        // 4. Broadcast apenas do card movido (BroadcastChannel / Supabase Broadcast)
+        publishRealtimeUpdate({
+          company_id: session.company_id,
+          section: 'esteira',
+          actionLabel: '',
+          actorName: session.ownerName,
+          actorRole: session.role,
+          order: authoritativeOrder,
+        });
+      } catch {
+        // Reverter apenas este card e exibir erro discreto (sem toast de tempo real)
+        pendingOrderIdsRef.current.delete(orderId);
+        setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
+        setDb((prev) =>
+          saveEnterpriseDatabaseLocalOnly({
+            ...prev,
+            orders: prev.orders.map((o) =>
+              o.id === orderId ? previousOrder : o
+            ),
+          })
+        );
+        setMoveError(`Não foi possível mover ${orderId}. Estado restaurado.`);
+        setTimeout(() => setMoveError(null), 4000);
       }
-    );
-    showToast(`${orderId} avançou para "${stageName}" (${stamp})`);
-  };
+    },
+    [db.orders, session]
+  );
 
   const handleTogglePaid = (orderId: string) => {
     const today = toISODate();
@@ -533,6 +678,302 @@ export const App: React.FC = () => {
     showToast(`Registro de retorno ${returnId} apagado!`);
   };
 
+  // Seção 6 • Estoque (Realtime Broadcast)
+  const handleAddStockItem = (
+    payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    const stamp = nowTimestampBR();
+    const newItem: StockItem = {
+      id: getNextStockId(db),
+      company_id: session?.company_id,
+      ...payload,
+      updatedAt: stamp,
+    };
+    commitDb(
+      {
+        ...db,
+        stock: [newItem, ...(db.stock || [])],
+      },
+      {
+        section: 'estoque',
+        actionLabel: `Item "${newItem.name}" adicionado ao Estoque`,
+      }
+    );
+    showToast(`Item "${newItem.name}" (${newItem.id}) adicionado ao estoque!`);
+  };
+
+  const handleUpdateStockItem = (
+    id: string,
+    payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    const stamp = nowTimestampBR();
+    const nextStock = (db.stock || []).map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            ...payload,
+            updatedAt: stamp,
+          }
+        : item
+    );
+    commitDb(
+      { ...db, stock: nextStock },
+      {
+        section: 'estoque',
+        actionLabel: `Item ${id} (${payload.name}) atualizado no Estoque`,
+      }
+    );
+    showToast(`Estoque atualizado (${payload.name})!`);
+  };
+
+  const handleDeleteStockItem = (id: string) => {
+    const target = (db.stock || []).find((i) => i.id === id);
+    const nextStock = (db.stock || []).filter((i) => i.id !== id);
+    commitDb(
+      { ...db, stock: nextStock },
+      {
+        section: 'estoque',
+        actionLabel: `Item "${target?.name || id}" removido do Estoque`,
+      }
+    );
+    showToast(`Item ${id} removido do estoque!`);
+  };
+
+  // Finanças: Despesas, Prestadores, Funcionários e Investimentos (Admin Only)
+  const handleUpsertMonthExpenses = (
+    month: string,
+    values: Record<ExpenseCategoryKey, number>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const current = db.expenses || [];
+    const exists = current.some((e) => e.month === month);
+    const nextExpenses = exists
+      ? current.map((e) =>
+          e.month === month ? { month, values, updatedAt: stamp } : e
+        )
+      : [{ month, values, updatedAt: stamp }, ...current];
+    commitDb(
+      { ...db, expenses: nextExpenses },
+      { section: 'financeiro', actionLabel: `Despesas de ${month} atualizadas` }
+    );
+  };
+
+  const handleAddProvider = (
+    payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const newProv: ServiceProviderRecord = {
+      id: getNextProviderId(db),
+      company_id: session.company_id,
+      ...payload,
+      updatedAt: stamp,
+    };
+    commitDb(
+      { ...db, serviceProviders: [newProv, ...(db.serviceProviders || [])] },
+      { section: 'financeiro', actionLabel: `Prestador "${newProv.name}" adicionado` }
+    );
+    showToast(`Prestador "${newProv.name}" cadastrado!`);
+  };
+
+  const handleUpdateProvider = (
+    id: string,
+    payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const next = (db.serviceProviders || []).map((p) =>
+      p.id === id ? { ...p, ...payload, updatedAt: stamp } : p
+    );
+    commitDb(
+      { ...db, serviceProviders: next },
+      { section: 'financeiro', actionLabel: `Prestador "${payload.name}" atualizado` }
+    );
+    showToast(`Prestador atualizado!`);
+  };
+
+  const handleDeleteProvider = (id: string) => {
+    if (session?.role !== 'admin') return;
+    const next = (db.serviceProviders || []).filter((p) => p.id !== id);
+    commitDb(
+      { ...db, serviceProviders: next },
+      { section: 'financeiro', actionLabel: `Prestador ${id} removido` }
+    );
+    showToast(`Prestador removido!`);
+  };
+
+  const handleAddPayrollEmployee = (
+    payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const newEmp: PayrollEmployeeRecord = {
+      id: getNextPayrollEmployeeId(db),
+      company_id: session.company_id,
+      ...payload,
+      updatedAt: stamp,
+    };
+    commitDb(
+      { ...db, payrollEmployees: [newEmp, ...(db.payrollEmployees || [])] },
+      { section: 'financeiro', actionLabel: `Funcionário "${newEmp.name}" cadastrado` }
+    );
+    showToast(`Funcionário "${newEmp.name}" cadastrado!`);
+  };
+
+  const handleUpdatePayrollEmployee = (
+    id: string,
+    payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const next = (db.payrollEmployees || []).map((e) =>
+      e.id === id ? { ...e, ...payload, updatedAt: stamp } : e
+    );
+    commitDb(
+      { ...db, payrollEmployees: next },
+      { section: 'financeiro', actionLabel: `Funcionário "${payload.name}" atualizado` }
+    );
+    showToast(`Funcionário atualizado!`);
+  };
+
+  const handleDeletePayrollEmployee = (id: string) => {
+    if (session?.role !== 'admin') return;
+    const next = (db.payrollEmployees || []).filter((e) => e.id !== id);
+    commitDb(
+      { ...db, payrollEmployees: next },
+      { section: 'financeiro', actionLabel: `Funcionário ${id} removido` }
+    );
+    showToast(`Funcionário removido!`);
+  };
+
+  const handleAddInvestment = (
+    payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const newInv: InvestmentRecord = {
+      id: getNextInvestmentId(db),
+      company_id: session.company_id,
+      ...payload,
+      updatedAt: stamp,
+    };
+    commitDb(
+      { ...db, investments: [newInv, ...(db.investments || [])] },
+      { section: 'financeiro', actionLabel: `Investimento "${newInv.assetName}" cadastrado` }
+    );
+    showToast(`Investimento "${newInv.assetName}" adicionado!`);
+  };
+
+  const handleUpdateInvestment = (
+    id: string,
+    payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
+  ) => {
+    if (session?.role !== 'admin') return;
+    const stamp = nowTimestampBR();
+    const next = (db.investments || []).map((inv) =>
+      inv.id === id ? { ...inv, ...payload, updatedAt: stamp } : inv
+    );
+    commitDb(
+      { ...db, investments: next },
+      { section: 'financeiro', actionLabel: `Investimento "${payload.assetName}" atualizado` }
+    );
+    showToast(`Investimento atualizado!`);
+  };
+
+  const handleDeleteInvestment = (id: string) => {
+    if (session?.role !== 'admin') return;
+    const next = (db.investments || []).filter((inv) => inv.id !== id);
+    commitDb(
+      { ...db, investments: next },
+      { section: 'financeiro', actionLabel: `Investimento ${id} removido` }
+    );
+    showToast(`Investimento removido!`);
+  };
+
+  // Seção Notas (Admin & Operador)
+  const nextNoteNumber = useMemo(() => getNextNoteNumber(db), [db]);
+
+  const handleSaveNote = (
+    payload: Omit<NoteRecord, 'id' | 'company_id' | 'criadoPor' | 'criadoEm'>,
+    editingId?: string
+  ) => {
+    if (!session || session.role === 'cliente') return;
+    const stamp = new Date().toISOString();
+    const currentNotas = db.notas || [];
+
+    if (editingId) {
+      const nextNotas = currentNotas.map((n) =>
+        n.id === editingId
+          ? {
+              ...n,
+              ...payload,
+              numero: n.numero,
+            }
+          : n
+      );
+      commitDb(
+        { ...db, notas: nextNotas },
+        {
+          section: 'notas',
+          actionLabel: `Nota Nº ${String(payload.numero).padStart(4, '0')} atualizada`,
+        }
+      );
+      showToast(`Nota Nº ${String(payload.numero).padStart(4, '0')} atualizada!`);
+      return;
+    }
+
+    const assignedNumber = getNextNoteNumber(db);
+    const newNote: NoteRecord = {
+      id: `NF-${Date.now().toString().slice(-6)}`,
+      company_id: session.company_id,
+      ...payload,
+      numero: assignedNumber,
+      criadoPor: session.ownerName,
+      criadoEm: stamp,
+    };
+    commitDb(
+      {
+        ...db,
+        notas: [newNote, ...currentNotas],
+        noteSequence: assignedNumber,
+      },
+      {
+        section: 'notas',
+        actionLabel: `Nota Nº ${String(assignedNumber).padStart(4, '0')} emitida`,
+      }
+    );
+    showToast(`Nota Nº ${String(assignedNumber).padStart(4, '0')} emitida!`);
+  };
+
+  const handleMarkNotePrinted = (id: string) => {
+    if (!session || session.role === 'cliente') return;
+    const nextNotas = (db.notas || []).map((n) =>
+      n.id === id ? { ...n, status: 'impressa' as const } : n
+    );
+    commitDb(
+      { ...db, notas: nextNotas },
+      { section: 'notas', actionLabel: `Nota impressa` }
+    );
+  };
+
+  const handleDeleteNote = (id: string) => {
+    if (!session || session.role === 'cliente') return;
+    const nextNotas = (db.notas || []).filter((n) => n.id !== id);
+    commitDb(
+      { ...db, notas: nextNotas },
+      { section: 'notas', actionLabel: `Nota removida` }
+    );
+    showToast(`Nota removida!`);
+  };
+
+  const handleTriggerPrint = (note: NoteRecord, threePerPage: boolean) => {
+    setPrintJob({ note, threePerPage });
+    setTimeout(() => {
+      window.print();
+    }, 120);
+  };
+
   // Employee Management (Admin Only)
   const handleAddEmployee = (payload: {
     ownerName: string;
@@ -624,11 +1065,24 @@ export const App: React.FC = () => {
     overdue: financials.overdueCount,
     deliveries: db.deliveries.length,
     openReturns: db.returns.filter((r) => r.status !== 'liberado').length,
+    stock: (db.stock || []).length,
+    notas: (db.notas || []).length,
     employees: employees.length,
   };
 
   if (!session) {
-    return <AuthLoginScreen onAuthenticated={handleAuthenticated} />;
+    return (
+      <div className="min-h-screen relative overflow-hidden">
+        <div className="blob blob-1" />
+        <div className="blob blob-2" />
+        <div className="blob blob-3" />
+        <div className="blob blob-4" />
+        <div className="blob blob-5" />
+        <div className="relative z-10">
+          <AuthLoginScreen onAuthenticated={handleAuthenticated} />
+        </div>
+      </div>
+    );
   }
 
   // Enforce RBAC section access
@@ -638,49 +1092,62 @@ export const App: React.FC = () => {
       ? 'esteira'
       : activeSection;
 
+  const printSlips = printJob
+    ? (() => {
+        const chunks = chunkNoteItems(printJob.note.items, 6);
+        if (printJob.threePerPage && chunks.length === 1) {
+          return [chunks[0], chunks[0], chunks[0]];
+        }
+        return chunks;
+      })()
+    : [];
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-slate-100 pb-24 selection:bg-rose-800 selection:text-white">
-      {/* Navigation Shell */}
-      <HeaderBar
-        activeSection={effectiveSection}
-        onSelectSection={handleSelectSection}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        onOpenNewOrder={() => setIsNewModalOpen(true)}
-        tenantName={session.companyName}
-        userRole={session.role}
-        userName={session.ownerName}
-        realtimeStatus={realtimeStatus}
-        onLogout={handleLogout}
-        counts={counts}
-      />
+    <>
+    <div className="no-print min-h-screen text-slate-900 pb-20 relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+      {/* Ambient Liquid Glass Morphing Blobs */}
+      <div className="blob blob-1" />
+      <div className="blob blob-2" />
+      <div className="blob blob-3" />
+      <div className="blob blob-4" />
+      <div className="blob blob-5" />
 
-      {/* Toast Notification (Standard + Realtime Live Event) */}
-      {toast && (
-        <div
-          className={`fixed bottom-20 right-6 z-50 px-4 py-3 rounded-2xl bg-zinc-900 border ${
-            toast.isRealtime
-              ? 'border-emerald-500/70 shadow-emerald-950/60'
-              : 'border-rose-700/70'
-          } text-slate-50 text-xs font-semibold shadow-2xl flex items-center gap-2`}
-        >
-          {toast.isRealtime ? (
-            <Radio className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          )}
-          <span>{toast.message}</span>
-        </div>
-      )}
+      {/* Dashboard Shell */}
+      <div className="max-w-[1720px] mx-auto flex gap-5 relative z-10 p-3 md:p-6 lg:p-7">
+        <LiquidSidebar
+          activeSection={effectiveSection}
+          onSelectSection={handleSelectSection}
+          tenantName={session.companyName}
+          userRole={session.role}
+          userName={session.ownerName}
+          onLogout={handleLogout}
+          counts={counts}
+        />
 
-      {/* Main Content Container */}
-      <main className="max-w-[1520px] mx-auto lg:pl-24 px-4 sm:px-6 pt-6">
+        <div className="flex-1 flex flex-col gap-5 min-w-0">
+          <HeaderBar
+            activeSection={effectiveSection}
+            onSelectSection={handleSelectSection}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onOpenNewOrder={() => setIsNewModalOpen(true)}
+            tenantName={session.companyName}
+            userRole={session.role}
+            userName={session.ownerName}
+            realtimeStatus={realtimeStatus}
+            onLogout={handleLogout}
+            counts={counts}
+          />
+
+          {/* Main Content Container */}
+          <main className="flex-1 flex flex-col gap-5">
         {session.role === 'admin' && effectiveSection === 'bento_home' && (
           <BentoOverviewSection
             companies={filteredCompanies}
             orders={filteredOrders}
             deliveries={db.deliveries}
             returns={db.returns}
+            stock={db.stock || []}
             financials={financials}
             onNavigate={handleSelectSection}
             onOpenNewOrder={() => setIsNewModalOpen(true)}
@@ -714,6 +1181,8 @@ export const App: React.FC = () => {
         {effectiveSection === 'esteira' && (
           <ProductionKanban
             orders={filteredOrders}
+            pendingOrderIds={pendingOrderIds}
+            moveError={moveError}
             onMoveStage={handleMoveStage}
             onDeleteOrder={handleDeleteOrder}
             onQuickRegisterDelivery={(order) => {
@@ -727,9 +1196,23 @@ export const App: React.FC = () => {
           <FinanceAnalyticsSection
             orders={filteredOrders}
             financials={financials}
+            expenses={db.expenses || []}
+            serviceProviders={db.serviceProviders || []}
+            payrollEmployees={db.payrollEmployees || []}
+            investments={db.investments || []}
             onTogglePaid={handleTogglePaid}
             onEmitBilling30d={handleEmitBilling30d}
             onDeleteOrder={handleDeleteOrder}
+            onUpsertMonthExpenses={handleUpsertMonthExpenses}
+            onAddProvider={handleAddProvider}
+            onUpdateProvider={handleUpdateProvider}
+            onDeleteProvider={handleDeleteProvider}
+            onAddPayrollEmployee={handleAddPayrollEmployee}
+            onUpdatePayrollEmployee={handleUpdatePayrollEmployee}
+            onDeletePayrollEmployee={handleDeletePayrollEmployee}
+            onAddInvestment={handleAddInvestment}
+            onUpdateInvestment={handleUpdateInvestment}
+            onDeleteInvestment={handleDeleteInvestment}
           />
         )}
 
@@ -753,31 +1236,61 @@ export const App: React.FC = () => {
           />
         )}
 
+        {effectiveSection === 'estoque' && (
+          <StockSection
+            items={db.stock || []}
+            globalSearchQuery={searchQuery}
+            onAddItem={handleAddStockItem}
+            onUpdateItem={handleUpdateStockItem}
+            onDeleteItem={handleDeleteStockItem}
+          />
+        )}
+
+        {effectiveSection === 'notas' && session.role !== 'cliente' && (
+          <NotesSection
+            notas={db.notas || []}
+            companies={db.companies}
+            orders={db.orders}
+            nextNoteNumber={nextNoteNumber}
+            tenantName={session.companyName}
+            currentUserName={session.ownerName}
+            globalSearchQuery={searchQuery}
+            onSaveNote={handleSaveNote}
+            onMarkNotePrinted={handleMarkNotePrinted}
+            onDeleteNote={handleDeleteNote}
+            onTriggerPrint={handleTriggerPrint}
+          />
+        )}
+
         {session.role === 'admin' && effectiveSection === 'equipe' && (
           <TeamManagementSection
             session={session}
             employees={employees}
-            realtimeStatus={realtimeStatus}
             onAddEmployee={handleAddEmployee}
             onToggleEmployeeRole={handleToggleEmployeeRole}
             onDeleteEmployee={handleDeleteEmployee}
             onImpersonateEmployee={handleImpersonateEmployee}
-            onSupabaseConfigSaved={() => {
-              setRealtimeConfigTick((t) => t + 1);
-              showToast('Configuração Supabase Realtime salva e reconectada!');
-            }}
           />
         )}
-      </main>
+          </main>
+        </div>
+      </div>
 
-      {/* Prominent Floating Action Button ("Nova OS") - Admin Only */}
+      {/* Toast Notification (Apenas ações locais; sincronização é silenciosa) */}
+      {toast && (
+        <div className="fixed bottom-20 right-6 z-50 px-4 py-3 rounded-2xl liquid-glass ring-2 ring-indigo-400/50 text-slate-900 text-xs font-bold shadow-2xl flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Prominent Floating Action Button ("Nova OS") - Mobile/Tablet Admin Only */}
       {session.role === 'admin' && (
         <button
           type="button"
           onClick={() => setIsNewModalOpen(true)}
-          className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-5 py-3.5 rounded-3xl font-bold text-xs bg-gradient-to-r from-rose-800 to-red-900 hover:from-rose-700 hover:to-red-800 active:scale-95 text-slate-50 border border-rose-500/40 shadow-2xl shadow-rose-950/90 transition-all cursor-pointer"
+          className="md:hidden fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-5 py-3.5 rounded-full font-bold text-xs bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 text-white border border-white/40 shadow-2xl shadow-indigo-600/40 transition-all cursor-pointer"
         >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>Nova OS</span>
         </button>
       )}
@@ -793,6 +1306,24 @@ export const App: React.FC = () => {
         />
       )}
     </div>
+
+    {/* Container exclusivo de impressão 1/3 A4 */}
+    {printJob && (
+      <div className="print-only-container">
+        {printSlips.map((chunk, idx) => (
+          <CanhotoSlipCard
+            key={`print-${printJob.note.id}-${idx}`}
+            note={printJob.note}
+            itemsChunk={chunk}
+            slipIndex={printJob.threePerPage && chunkNoteItems(printJob.note.items, 6).length === 1 ? 0 : idx}
+            totalSlips={chunkNoteItems(printJob.note.items, 6).length}
+            tenantName={session.companyName}
+            isPrintMode
+          />
+        ))}
+      </div>
+    )}
+    </>
   );
 };
 

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Trash2,
   Truck,
@@ -9,6 +11,7 @@ import {
 import { DieOrder, ProductionStage } from '../types/order';
 import {
   formatBRL,
+  formatDateBR,
   getNextStage,
   getPrevStage,
   PAYMENT_MODALITY_META,
@@ -17,34 +20,205 @@ import {
 
 interface ProductionKanbanProps {
   orders: DieOrder[];
+  pendingOrderIds?: string[];
+  moveError?: string | null;
   onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
   onQuickRegisterDelivery: (order: DieOrder) => void;
   onDeleteOrder: (orderId: string) => void;
 }
 
+interface OrderKanbanCardProps {
+  order: DieOrder;
+  isPending: boolean;
+  isExpanded: boolean;
+  onToggleExpand: (id: string) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
+  onQuickRegisterDelivery: (order: DieOrder) => void;
+  onDeleteOrder: (orderId: string) => void;
+}
+
+const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
+  ({
+    order,
+    isPending,
+    isExpanded,
+    onToggleExpand,
+    onDragStart,
+    onDragEnd,
+    onMoveStage,
+    onQuickRegisterDelivery,
+    onDeleteOrder,
+  }) => {
+    const prevStage = getPrevStage(order.stage);
+    const nextStage = getNextStage(order.stage);
+    const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
+
+    return (
+      <div
+        draggable={!isPending}
+        onDragStart={() => onDragStart(order.id)}
+        onDragEnd={onDragEnd}
+        className={`rounded-2xl p-3.5 liquid-glass-subtle hover:bg-white/45 transition-colors cursor-grab active:cursor-grabbing flex flex-col gap-2.5 ${
+          isPending ? 'opacity-75 ring-1 ring-indigo-400/70' : ''
+        }`}
+      >
+        {/* Top OS + Payment Modality + Expand + Delete */}
+        <div className="flex items-center justify-between gap-1.5">
+          <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-[11px] font-bold text-indigo-800">
+            {order.id}
+          </span>
+          <div className="flex items-center gap-1">
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${modMeta?.badgeClass}`}
+            >
+              {modMeta?.short}
+            </span>
+            <button
+              type="button"
+              onClick={() => onToggleExpand(order.id)}
+              className="p-1 rounded-lg bg-white/60 hover:bg-white/90 text-slate-600 border border-white/70 transition-colors cursor-pointer"
+              title="Detalhes da OS"
+            >
+              {isExpanded ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteOrder(order.id)}
+              className="p-1 rounded-lg bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/70 transition-colors cursor-pointer"
+              title="Apagar esta OS"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+
+        {/* Company & Tool Description */}
+        <div>
+          <span className="text-[11px] font-bold text-slate-600 block truncate">
+            {order.companyName}
+          </span>
+          <h4 className="text-xs font-extrabold text-slate-900 leading-snug mt-0.5">
+            {order.toolDescription}
+          </h4>
+        </div>
+
+        {/* Preserved Expanded Details (survives remote updates) */}
+        {isExpanded && (
+          <div className="p-2.5 rounded-xl bg-white/55 border border-white/75 text-[11px] space-y-1 text-slate-700">
+            <div>
+              <strong>Vencimento:</strong> {formatDateBR(order.dueDate)}
+            </div>
+            <div>
+              <strong>Telefone:</strong> {order.companyPhone || 'Não informado'}
+            </div>
+            <div>
+              <strong>Versão:</strong> v{order.version || 1}
+            </div>
+          </div>
+        )}
+
+        {/* Timestamp of Stage Alteration */}
+        <div className="flex items-center justify-between text-[10px] text-slate-700 bg-white/55 px-2.5 py-1.5 rounded-xl border border-white/70">
+          <span className="flex items-center gap-1 font-semibold">
+            <Clock className="w-3 h-3 text-indigo-600 shrink-0" />
+            <span>{isPending ? 'Salvando...' : order.stageUpdatedAt}</span>
+          </span>
+          <span className="font-mono font-extrabold text-emerald-700">
+            {formatBRL(order.amount)}
+          </span>
+        </div>
+
+        {/* Stage Move Controls */}
+        <div className="flex items-center gap-1.5 pt-1">
+          {prevStage && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => onMoveStage(order.id, prevStage)}
+              className="p-1.5 rounded-xl bg-white/65 hover:bg-white/90 disabled:opacity-50 text-slate-700 border border-white/80 transition-colors cursor-pointer"
+              title="Voltar etapa anterior"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {nextStage ? (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => onMoveStage(order.id, nextStage)}
+              className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-50 text-white border border-white/40 shadow-sm flex items-center justify-center gap-1 transition-colors cursor-pointer"
+            >
+              <span>Avançar Etapa</span>
+              <ArrowRight className="w-3 h-3 stroke-[2.2]" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => onQuickRegisterDelivery(order)}
+              className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white border border-white/40 shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span>Despachar / Saída</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+);
+
 export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
   orders,
+  pendingOrderIds = [],
+  moveError,
   onMoveStage,
   onQuickRegisterDelivery,
   onDeleteOrder,
 }) => {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<ProductionStage | null>(null);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  const pendingSet = new Set(pendingOrderIds);
+
+  const handleToggleExpand = (orderId: string) => {
+    setExpandedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-bold text-slate-50 tracking-tight">
-            Seção 2 • Esteira Física de Produção
+          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
+            Esteira Física de Produção
           </h2>
-          <p className="text-xs text-zinc-400">
-            Arraste os cartões ou clique em avançar. Cada mudança grava automaticamente a data e hora exata da etapa.
+          <p className="text-xs font-medium text-slate-700">
+            Arraste os cartões ou clique em avançar. Cada mudança grava a data e hora da etapa.
           </p>
         </div>
+        {moveError && (
+          <div className="px-3.5 py-2 rounded-full bg-rose-500/15 border border-rose-300/70 text-xs font-bold text-rose-800">
+            {moveError}
+          </div>
+        )}
       </div>
 
-      {/* 6-Column Bento Kanban */}
+      {/* 6-Column Liquid Glass Kanban */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4 items-start">
         {PRODUCTION_STAGES.map((stage) => {
           const colOrders = orders.filter((o) => o.stage === stage.id);
@@ -56,146 +230,77 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
               key={stage.id}
               onDragOver={(e) => {
                 e.preventDefault();
-                setDragOverStage(stage.id);
+                if (dragOverStage !== stage.id) {
+                  setDragOverStage(stage.id);
+                }
               }}
               onDragLeave={() => setDragOverStage(null)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOverStage(null);
                 if (draggedId) {
-                  onMoveStage(draggedId, stage.id);
+                  const draggedOrder = orders.find((o) => o.id === draggedId);
+                  if (draggedOrder && draggedOrder.stage !== stage.id) {
+                    onMoveStage(draggedId, stage.id);
+                  }
                   setDraggedId(null);
                 }
               }}
-              className={`rounded-3xl p-4 border transition-all min-h-[480px] flex flex-col gap-3 ${
-                isOver
-                  ? 'bg-rose-950/30 border-rose-600'
-                  : `bg-zinc-900/85 ${stage.accentColor}`
+              className={`liquid-glass rounded-[26px] p-4 transition-colors min-h-[480px] flex flex-col gap-3 ${
+                isOver ? 'ring-2 ring-indigo-500/70' : ''
               }`}
             >
               {/* Column Header */}
-              <div className="pb-3 border-b border-zinc-800/80">
+              <div className="pb-3 border-b border-white/60">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${stage.dotClass}`} />
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
                       Etapa {stage.step}
                     </span>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-zinc-950 text-slate-100 border border-zinc-800">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-white/70 text-slate-900 border border-white/80 shadow-xs">
                     {colOrders.length}
                   </span>
                 </div>
-                <h3 className="text-sm font-bold text-slate-50 mt-1">{stage.label}</h3>
-                <p className="text-[11px] text-zinc-500 mt-0.5">{stage.subtitle}</p>
-                <div className="mt-2 pt-2 border-t border-zinc-800/40 flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-zinc-400">Volume:</span>
-                  <span className="font-bold text-emerald-400">{formatBRL(colTotal)}</span>
+                <h3 className="text-sm font-extrabold text-slate-900 mt-1.5 frosted-text-depth">
+                  {stage.label}
+                </h3>
+                <p className="text-[11px] font-medium text-slate-600 mt-0.5">
+                  {stage.subtitle}
+                </p>
+                <div className="mt-2 pt-2 border-t border-white/45 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-slate-600 font-semibold">Volume:</span>
+                  <span className="font-extrabold text-emerald-700">
+                    {formatBRL(colTotal)}
+                  </span>
                 </div>
               </div>
 
               {/* Cards */}
               <div className="space-y-3 flex-1">
                 {colOrders.length === 0 ? (
-                  <div className="h-32 rounded-2xl border border-dashed border-zinc-800/80 flex items-center justify-center text-xs text-zinc-600 text-center px-2">
+                  <div className="h-32 rounded-2xl border border-dashed border-white/75 bg-white/20 flex items-center justify-center text-xs font-medium text-slate-600 text-center px-2">
                     Sem facas em {stage.label}
                   </div>
                 ) : (
-                  colOrders.map((order) => {
-                    const prevStage = getPrevStage(order.stage);
-                    const nextStage = getNextStage(order.stage);
-                    const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
-
-                    return (
-                      <div
-                        key={order.id}
-                        draggable
-                        onDragStart={() => setDraggedId(order.id)}
-                        onDragEnd={() => {
-                          setDraggedId(null);
-                          setDragOverStage(null);
-                        }}
-                        className="rounded-2xl p-3.5 bg-zinc-950/90 border border-zinc-800/90 hover:border-rose-700/60 transition-all shadow-md cursor-grab active:cursor-grabbing flex flex-col gap-2.5"
-                      >
-                        {/* Top OS + Payment Modality + Delete */}
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="px-2 py-0.5 rounded-lg bg-rose-950/80 border border-rose-800/60 font-mono text-[11px] font-bold text-rose-300">
-                            {order.id}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${modMeta?.badgeClass}`}
-                            >
-                              {modMeta?.short}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => onDeleteOrder(order.id)}
-                              className="p-1 rounded-lg bg-zinc-900 hover:bg-rose-900/80 text-zinc-500 hover:text-rose-200 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
-                              title="Apagar esta OS"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Company & Tool Description */}
-                        <div>
-                          <span className="text-[11px] font-semibold text-zinc-400 block truncate">
-                            {order.companyName}
-                          </span>
-                          <h4 className="text-xs font-bold text-slate-100 leading-snug mt-0.5">
-                            {order.toolDescription}
-                          </h4>
-                        </div>
-
-                        {/* Timestamp of Stage Alteration */}
-                        <div className="flex items-center justify-between text-[10px] text-zinc-400 bg-zinc-900/90 px-2.5 py-1.5 rounded-xl border border-zinc-800/70">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-rose-400 shrink-0" />
-                            <span>{order.stageUpdatedAt}</span>
-                          </span>
-                          <span className="font-mono font-bold text-emerald-400">
-                            {formatBRL(order.amount)}
-                          </span>
-                        </div>
-
-                        {/* Stage Move Controls */}
-                        <div className="flex items-center gap-1.5 pt-1">
-                          {prevStage && (
-                            <button
-                              type="button"
-                              onClick={() => onMoveStage(order.id, prevStage)}
-                              className="p-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-slate-200 border border-zinc-800 transition cursor-pointer"
-                              title="Voltar etapa anterior"
-                            >
-                              <ArrowLeft className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {nextStage ? (
-                            <button
-                              type="button"
-                              onClick={() => onMoveStage(order.id, nextStage)}
-                              className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold bg-rose-900/80 hover:bg-rose-700 text-slate-50 border border-rose-700/50 flex items-center justify-center gap-1 transition cursor-pointer"
-                            >
-                              <span>Avançar Etapa</span>
-                              <ArrowRight className="w-3 h-3 stroke-[2.2]" />
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => onQuickRegisterDelivery(order)}
-                              className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                            >
-                              <Truck className="w-3.5 h-3.5" />
-                              <span>Despachar / Saída</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
+                  colOrders.map((order) => (
+                    <OrderKanbanCard
+                      key={order.id}
+                      order={order}
+                      isPending={pendingSet.has(order.id)}
+                      isExpanded={expandedOrderIds.has(order.id)}
+                      onToggleExpand={handleToggleExpand}
+                      onDragStart={setDraggedId}
+                      onDragEnd={() => {
+                        setDraggedId(null);
+                        setDragOverStage(null);
+                      }}
+                      onMoveStage={onMoveStage}
+                      onQuickRegisterDelivery={onQuickRegisterDelivery}
+                      onDeleteOrder={onDeleteOrder}
+                    />
+                  ))
                 )}
               </div>
             </div>

@@ -34,7 +34,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
   const [customCompanyName, setCustomCompanyName] = useState('');
   const [toolDescription, setToolDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [paymentModality, setPaymentModality] = useState<PaymentModality>('a_prazo');
+  const [paymentModality, setPaymentModality] = useState<PaymentModality>('boleto');
   const [stage, setStage] = useState<ProductionStage>('arquivo_recebido');
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
       setCustomCompanyName('');
       setToolDescription('');
       setAmount('');
-      setPaymentModality('a_prazo');
+      setPaymentModality('boleto');
       setStage('arquivo_recebido');
     }
   }, [isOpen, companies]);
@@ -76,25 +76,29 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
   };
 
   const inputClass =
-    'w-full px-3.5 py-2.5 text-sm rounded-2xl bg-zinc-900 border border-zinc-800 text-slate-100 placeholder-zinc-500 focus:border-rose-700 outline-none transition';
+    'liquid-glass-pill w-full px-3.5 py-2.5 text-sm rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl bg-zinc-950 border border-zinc-800/90 p-6 shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/35 backdrop-blur-md p-0 sm:p-4">
+      <div className="w-full sm:max-w-lg rounded-t-[30px] sm:rounded-[30px] liquid-glass bg-white/60 p-6 shadow-2xl space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-rose-700 to-red-950 border border-rose-500/30 flex items-center justify-center text-white">
-              <Layers className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-sky-400 p-[1.5px] shadow-md flex items-center justify-center">
+              <div className="w-full h-full bg-white/90 rounded-[10px] flex items-center justify-center">
+                <Layers className="w-4 h-4 text-indigo-600" />
+              </div>
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-50">Nova Ordem de Serviço</h2>
-                <span className="px-2 py-0.5 rounded-lg bg-rose-950/90 border border-rose-800/60 font-mono text-xs font-bold text-rose-300">
+                <h2 className="text-base font-extrabold text-slate-900">
+                  Nova Ordem de Serviço
+                </h2>
+                <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
                   {nextOrderId}
                 </span>
               </div>
-              <p className="text-[11px] text-zinc-400">
+              <p className="text-[11px] font-medium text-slate-600">
                 Lançamento rápido • Entra direto na Esteira e no Financeiro
               </p>
             </div>
@@ -103,7 +107,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-slate-100 transition cursor-pointer"
+            className="p-2 rounded-full liquid-glass-pill text-slate-700 hover:text-slate-950 transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -112,7 +116,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-3.5">
           {/* 1. Seleção da Empresa Cliente */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1">
+            <label className="text-xs font-bold text-slate-700 block mb-1">
               1. Empresa / Cliente
             </label>
             <select
@@ -142,8 +146,8 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
 
           {/* 2. Dados da Faca */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1">
-              2. Descrição Detalhada da Ferramenta (Faca) *
+            <label className="text-xs font-bold text-slate-700 block mb-1">
+              2. Descrição Detalhada da Ferramenta
             </label>
             <input
               type="text"
@@ -159,8 +163,8 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
           {/* 3. Valor & Status Inicial de Produção */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-zinc-300 block mb-1">
-                3. Valor (R$) *
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                3. Valor em R$
               </label>
               <input
                 type="number"
@@ -175,7 +179,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-zinc-300 block mb-1">
+              <label className="text-xs font-bold text-slate-700 block mb-1">
                 4. Status Inicial na Esteira
               </label>
               <select
@@ -194,7 +198,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
 
           {/* 4. Condição de Pagamento (5 Modalidades) */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
               5. Condição de Pagamento
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -206,13 +210,13 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
                     type="button"
                     key={mod}
                     onClick={() => setPaymentModality(mod)}
-                    className={`py-2 px-3 rounded-2xl text-xs font-semibold border text-left flex items-center justify-between transition cursor-pointer ${
+                    className={`py-2 px-3 rounded-2xl text-xs font-bold border text-left flex items-center justify-between transition cursor-pointer ${
                       selected
-                        ? 'bg-rose-800 text-white border-rose-600 shadow-sm'
-                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-slate-200'
+                        ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-white/40 shadow-md'
+                        : 'liquid-glass-pill text-slate-700'
                     }`}
                   >
-                    <span className="truncate">[{meta.short}]</span>
+                    <span className="truncate">{meta.short}</span>
                     {selected && <Check className="w-3.5 h-3.5 shrink-0 ml-1" />}
                   </button>
                 );
@@ -223,7 +227,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 rounded-2xl text-sm font-bold bg-gradient-to-r from-rose-800 to-red-900 hover:from-rose-700 hover:to-red-800 text-slate-50 shadow-lg shadow-rose-950/80 flex items-center justify-center gap-2 transition cursor-pointer"
+              className="w-full py-3 rounded-full text-sm font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
             >
               <Check className="w-4 h-4 stroke-[2.5]" />
               <span>Registrar {nextOrderId} na Esteira</span>

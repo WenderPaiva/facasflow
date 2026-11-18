@@ -81,18 +81,73 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // REST API Adapter Endpoint: /api/orders (Multi-tenant aware)
+  // REST API Adapter Endpoint: /api/orders (Multi-tenant aware + Server-side RBAC)
   if (pathname === '/api/orders') {
     const rawCompanyId = parsedUrl.searchParams.get('company_id') || 'tenant_qualifacas';
     const safeCompanyId = rawCompanyId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const tenantDbFile = path.join(DATA_DIR, `facasflow-db-${safeCompanyId}.json`);
+    const reqRole = String(req.headers['x-facasflow-role'] || 'admin').toLowerCase();
+
+    const sanitizeForRole = (dbObj, role) => {
+      if (role === 'admin') return dbObj;
+      const copy = { ...dbObj };
+      delete copy.expenses;
+      delete copy.serviceProviders;
+      delete copy.payrollEmployees;
+      delete copy.investments;
+      delete copy.employees;
+      if (role === 'cliente') {
+        delete copy.stock;
+        delete copy.notas;
+        delete copy.noteSequence;
+      }
+      return copy;
+    };
+
+    const enforceNotasIntegrity = (incomingDb, existingDb) => {
+      if (!Array.isArray(incomingDb.notas)) return incomingDb;
+      let seq = Math.max(
+        Number(existingDb?.noteSequence) || 0,
+        Number(incomingDb.noteSequence) || 0
+      );
+      const existingMap = new Map(
+        (Array.isArray(existingDb?.notas) ? existingDb.notas : []).map((n) => [n.id, n])
+      );
+
+      const normalizedNotas = incomingDb.notas.map((n) => {
+        const items = (Array.isArray(n.items) ? n.items : []).map((it) => {
+          const qtd = Math.max(0, Number(it.quantidade) || 0);
+          const unit = Math.max(0, Number(it.precoUnitario) || 0);
+          return {
+            ...it,
+            quantidade: qtd,
+            precoUnitario: unit,
+            total: Math.round(qtd * unit * 100) / 100,
+          };
+        });
+        const total = Math.round(items.reduce((s, it) => s + it.total, 0) * 100) / 100;
+        const prev = existingMap.get(n.id);
+        let numero = prev ? Number(prev.numero) : Number(n.numero) || 0;
+        if (!prev && (!numero || numero <= seq)) {
+          seq += 1;
+          numero = seq;
+        } else if (numero > seq) {
+          seq = numero;
+        }
+        return { ...n, numero, items, total };
+      });
+
+      return { ...incomingDb, notas: normalizedNotas, noteSequence: seq };
+    };
 
     if (req.method === 'GET') {
       if (fs.existsSync(tenantDbFile)) {
         try {
           const raw = fs.readFileSync(tenantDbFile, 'utf8');
+          const parsed = JSON.parse(raw);
+          const safePayload = sanitizeForRole(parsed, reqRole);
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(raw);
+          res.end(JSON.stringify(safePayload));
           return;
         } catch {
           // fallback
@@ -104,23 +159,65 @@ const server = http.createServer((req, res) => {
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
+      if (reqRole === 'cliente') {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Forbidden: cliente role is read-only' }));
+        return;
+      }
+
       let body = '';
       req.on('data', (chunk) => {
         body += chunk;
       });
       req.on('end', () => {
         try {
+          const clientId = String(req.headers['x-facasflow-client-id'] || '');
           const parsed = JSON.parse(body);
-          fs.writeFileSync(tenantDbFile, JSON.stringify(parsed, null, 2), 'utf8');
+          const existing = fs.existsSync(tenantDbFile)
+            ? JSON.parse(fs.readFileSync(tenantDbFile, 'utf8'))
+            : null;
+          let payloadToSave = enforceNotasIntegrity(parsed, existing);
+
+          // Server-side monotonic version guard for orders to reject stale overwrites
+          if (existing && Array.isArray(existing.orders) && Array.isArray(payloadToSave.orders)) {
+            const existingOrderMap = new Map(existing.orders.map((o) => [o.id, o]));
+            payloadToSave.orders = payloadToSave.orders.map((inc) => {
+              const prev = existingOrderMap.get(inc.id);
+              if (prev && (Number(prev.version) || 1) > (Number(inc.version) || 1)) {
+                return prev;
+              }
+              return {
+                ...inc,
+                version: Number(inc.version) || 1,
+                updatedAt: inc.updatedAt || new Date().toISOString(),
+              };
+            });
+          }
+
+          // Server-side RBAC: Operador cannot overwrite sensitive financial/admin collections
+          if (reqRole === 'operador' && existing) {
+            payloadToSave = {
+              ...existing,
+              orders: Array.isArray(payloadToSave.orders) ? payloadToSave.orders : existing.orders,
+              deliveries: Array.isArray(payloadToSave.deliveries) ? payloadToSave.deliveries : existing.deliveries,
+              returns: Array.isArray(payloadToSave.returns) ? payloadToSave.returns : existing.returns,
+              stock: Array.isArray(payloadToSave.stock) ? payloadToSave.stock : existing.stock,
+              notas: Array.isArray(payloadToSave.notas) ? payloadToSave.notas : existing.notas,
+              noteSequence: payloadToSave.noteSequence ?? existing.noteSequence,
+            };
+          }
+
+          fs.writeFileSync(tenantDbFile, JSON.stringify(payloadToSave, null, 2), 'utf8');
           broadcastSseToCompany(rawCompanyId, {
-            eventId: `sse_${Date.now()}`,
+            eventId: `sse_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            senderInstanceId: clientId,
             company_id: rawCompanyId,
             section: 'all',
-            actionLabel: ' Produção atualizada em tempo real',
-            actorName: 'Fábrica',
-            actorRole: 'operador',
+            actionLabel: '',
+            actorName: '',
+            actorRole: reqRole === 'operador' ? 'operador' : 'admin',
             timestamp: new Date().toISOString(),
-            db: parsed,
+            db: sanitizeForRole(payloadToSave, reqRole),
           });
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ status: 'ok', company_id: rawCompanyId, savedAt: new Date().toISOString() }));
@@ -131,6 +228,84 @@ const server = http.createServer((req, res) => {
       });
       return;
     }
+  }
+
+  // Atomic Single-Card Stage Move Endpoint: POST /api/orders/move (mirrors RPC mover_faca)
+  if (pathname === '/api/orders/move' && req.method === 'POST') {
+    const rawCompanyId = parsedUrl.searchParams.get('company_id') || 'tenant_qualifacas';
+    const safeCompanyId = rawCompanyId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const tenantDbFile = path.join(DATA_DIR, `facasflow-db-${safeCompanyId}.json`);
+    const reqRole = String(req.headers['x-facasflow-role'] || 'admin').toLowerCase();
+    const clientId = String(req.headers['x-facasflow-client-id'] || '');
+
+    if (reqRole === 'cliente') {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: 'Forbidden' }));
+      return;
+    }
+
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const { orderId, stage, stageUpdatedAt } = JSON.parse(body);
+        if (!orderId || !stage) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'orderId and stage required' }));
+          return;
+        }
+        const existing = fs.existsSync(tenantDbFile)
+          ? JSON.parse(fs.readFileSync(tenantDbFile, 'utf8'))
+          : { company_id: rawCompanyId, orders: [] };
+        let movedOrder = null;
+        const nowIso = new Date().toISOString();
+        const nextOrders = (existing.orders || []).map((o) => {
+          if (o.id !== orderId) return o;
+          const nextVer = (Number(o.version) || 1) + 1;
+          movedOrder = {
+            ...o,
+            stage,
+            stageUpdatedAt: stageUpdatedAt || o.stageUpdatedAt,
+            stageHistory: [
+              ...(o.stageHistory || []),
+              { stage, timestamp: stageUpdatedAt || nowIso },
+            ],
+            version: nextVer,
+            updatedAt: nowIso,
+          };
+          return movedOrder;
+        });
+
+        if (!movedOrder) {
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Order not found' }));
+          return;
+        }
+
+        const nextDb = { ...existing, orders: nextOrders };
+        fs.writeFileSync(tenantDbFile, JSON.stringify(nextDb, null, 2), 'utf8');
+        broadcastSseToCompany(rawCompanyId, {
+          eventId: `sse_move_${movedOrder.id}_v${movedOrder.version}_${Date.now()}`,
+          senderInstanceId: clientId,
+          company_id: rawCompanyId,
+          section: 'esteira',
+          actionLabel: '',
+          actorName: '',
+          actorRole: reqRole === 'operador' ? 'operador' : 'admin',
+          timestamp: nowIso,
+          order: movedOrder,
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'ok', order: movedOrder }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
+    });
+    return;
   }
 
   // Static file serving

@@ -46,7 +46,6 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
   const activeCompany =
     companies.find((c) => c.id === selectedCompanyId) || companies[0] || null;
 
-  // New Company inline modal state
   const [showNewCompanyForm, setShowNewCompanyForm] = useState(
     companies.length === 0
   );
@@ -55,10 +54,9 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
   const [newPhone, setNewPhone] = useState('');
   const [newContact, setNewContact] = useState('');
 
-  // New Die inside Selected Company state
   const [toolDesc, setToolDesc] = useState('');
   const [toolAmount, setToolAmount] = useState('');
-  const [toolModality, setToolModality] = useState<PaymentModality>('a_prazo');
+  const [toolModality, setToolModality] = useState<PaymentModality>('boleto');
 
   const handleCreateCompany = (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,37 +89,38 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
   const companyTotalValue = companyOrders.reduce((acc, o) => acc + (o.amount || 0), 0);
 
   const inputClass =
-    'w-full px-3.5 py-2.5 text-xs rounded-2xl bg-zinc-950 border border-zinc-800 text-slate-100 placeholder-zinc-500 focus:border-rose-700 outline-none transition';
+    'liquid-glass-pill w-full px-3.5 py-2.5 text-xs rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
     <div className="space-y-5">
       {/* Header Row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-50 tracking-tight">
-            Seção 1 • Cadastro de Empresas
+          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
+            Cadastro de Empresas
           </h2>
-          <p className="text-xs text-zinc-400">
+          <p className="text-xs font-medium text-slate-700">
             Selecione uma empresa para consultar todo o histórico de facas ou cadastrar uma nova ferramenta vinculada.
           </p>
         </div>
 
         <button
+          type="button"
           onClick={() => setShowNewCompanyForm((prev) => !prev)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold bg-zinc-900 hover:bg-rose-900/80 text-slate-100 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
+          className="liquid-glass-pill inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold text-slate-900 hover:text-indigo-700 transition cursor-pointer"
         >
-          <Plus className="w-4 h-4 text-rose-400" />
+          <Plus className="w-4 h-4 text-indigo-600" />
           <span>{showNewCompanyForm ? 'Fechar Cadastro' : 'Nova Empresa Cliente'}</span>
         </button>
       </div>
 
-      {/* Collapsible New Company Bento Card */}
+      {/* Collapsible New Company Liquid Glass Card */}
       {showNewCompanyForm && (
         <form
           onSubmit={handleCreateCompany}
-          className="rounded-3xl p-6 bg-zinc-900/95 border border-rose-800/60 shadow-xl space-y-4"
+          className="liquid-glass rounded-[28px] p-6 space-y-4 ring-2 ring-indigo-400/40"
         >
-          <h3 className="text-sm font-bold text-rose-400">
+          <h3 className="text-sm font-extrabold text-indigo-700">
             Cadastrar Nova Empresa / Gráfica Cliente
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -158,7 +157,7 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
           <div className="flex justify-end">
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-2xl text-xs font-bold bg-rose-800 hover:bg-rose-700 text-slate-50 transition cursor-pointer"
+              className="px-5 py-2.5 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-md transition cursor-pointer"
             >
               Salvar Empresa
             </button>
@@ -166,15 +165,15 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
         </form>
       )}
 
-      {/* Main Split Bento Layout: Left Companies List (5 Cols) + Right Company Detail & Die Registration (7 Cols) */}
+      {/* Main Split Bento Layout */}
       {companies.length === 0 ? (
-        <div className="rounded-3xl p-10 bg-zinc-900/80 border border-dashed border-zinc-800 text-center space-y-2">
-          <Building2 className="w-8 h-8 text-rose-500 mx-auto" />
-          <h3 className="text-sm font-bold text-slate-100">
+        <div className="liquid-glass rounded-[28px] p-10 border-dashed text-center space-y-2">
+          <Building2 className="w-8 h-8 text-indigo-600 mx-auto" />
+          <h3 className="text-sm font-extrabold text-slate-900">
             Nenhuma empresa cadastrada ainda
           </h3>
-          <p className="text-xs text-zinc-400 max-w-md mx-auto">
-            Utilize o formulário acima ou o botão "Nova OS" para cadastrar seu primeiro cliente e iniciar o controle de ferramental.
+          <p className="text-xs font-medium text-slate-600 max-w-md mx-auto">
+            Utilize o formulário acima ou o botão &quot;Nova OS&quot; para cadastrar seu primeiro cliente e iniciar o controle de ferramental.
           </p>
         </div>
       ) : (
@@ -190,10 +189,10 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                 <div
                   key={comp.id}
                   onClick={() => onSelectCompany(comp.id)}
-                  className={`rounded-3xl p-5 border transition-all cursor-pointer ${
+                  className={`liquid-glass rounded-[26px] p-5 transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-gradient-to-br from-rose-950/60 via-zinc-900 to-zinc-900 border-rose-700/70 shadow-lg shadow-rose-950/40'
-                      : 'bg-zinc-900/80 border-zinc-800/80 hover:border-zinc-700'
+                      ? 'ring-2 ring-indigo-500/70 bg-white/45'
+                      : 'hover:bg-white/35'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -201,24 +200,24 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                       <div
                         className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
                           isSelected
-                            ? 'bg-rose-800 text-white border-rose-600'
-                            : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                            ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-white/40 shadow-md'
+                            : 'bg-white/65 text-indigo-600 border-white/80'
                         }`}
                       >
                         <Building2 className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-slate-50 leading-snug">
+                        <h3 className="text-sm font-extrabold text-slate-900 leading-snug">
                           {comp.corporateName}
                         </h3>
-                        <p className="text-xs font-mono text-zinc-400 mt-0.5">
+                        <p className="text-xs font-mono text-slate-600 mt-0.5">
                           CNPJ: {comp.cnpj}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="px-3 py-1 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-xs font-bold text-rose-400">
+                      <span className="px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-300/60 text-xs font-bold text-indigo-800">
                         {linked.length} {linked.length === 1 ? 'faca' : 'facas'}
                       </span>
                       <button
@@ -227,7 +226,7 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                           e.stopPropagation();
                           onDeleteCompany(comp.id);
                         }}
-                        className="p-2 rounded-2xl bg-zinc-950/80 hover:bg-rose-900/80 text-zinc-500 hover:text-rose-200 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
+                        className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
                         title="Apagar empresa e facas vinculadas"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -235,18 +234,18 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-zinc-800/70 flex items-center justify-between text-xs text-zinc-400">
+                  <div className="mt-4 pt-3 border-t border-white/55 flex items-center justify-between text-xs text-slate-700">
                     <div className="flex items-center gap-3">
-                      <span className="flex items-center gap-1">
-                        <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="flex items-center gap-1 font-medium">
+                        <Phone className="w-3.5 h-3.5 text-emerald-600" />
                         {comp.phone}
                       </span>
-                      <span className="hidden sm:flex items-center gap-1">
-                        <UserCheck className="w-3.5 h-3.5 text-rose-400" />
+                      <span className="hidden sm:flex items-center gap-1 font-medium">
+                        <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
                         {comp.contactName}
                       </span>
                     </div>
-                    <span className="font-mono font-bold text-slate-200">
+                    <span className="font-mono font-extrabold text-slate-900">
                       {formatBRL(sumVal)}
                     </span>
                   </div>
@@ -255,38 +254,38 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
             })}
           </div>
 
-          {/* RIGHT COLUMN: DETALHES DA EMPRESA & CADASTRO DE FACAS VINCULADAS (7 Cols) */}
+          {/* RIGHT COLUMN: DETALHES DA EMPRESA (7 Cols) */}
           {activeCompany && (
-            <div className="lg:col-span-7 rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 space-y-6">
+            <div className="lg:col-span-7 liquid-glass rounded-[28px] p-6 space-y-6">
               {/* Company Detail Header */}
-              <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-zinc-800">
+              <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-white/60">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
                     Ficha de Ferramental do Cliente
                   </span>
-                  <h3 className="text-xl font-bold text-slate-50 mt-0.5">
+                  <h3 className="text-xl font-extrabold text-slate-900 mt-0.5 frosted-text-depth">
                     {activeCompany.corporateName}
                   </h3>
-                  <p className="text-xs text-zinc-400 mt-1">
-                    CNPJ: <span className="font-mono text-zinc-300">{activeCompany.cnpj}</span> •
-                    WhatsApp: <span className="text-zinc-300">{activeCompany.phone}</span> •
-                    Contato: <span className="text-zinc-300">{activeCompany.contactName}</span>
+                  <p className="text-xs font-medium text-slate-600 mt-1">
+                    CNPJ: <span className="font-mono text-slate-800">{activeCompany.cnpj}</span> •
+                    WhatsApp: <span className="text-slate-800">{activeCompany.phone}</span> •
+                    Contato: <span className="text-slate-800">{activeCompany.contactName}</span>
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-800 text-right">
-                    <span className="text-[10px] uppercase text-zinc-400 block">
+                  <div className="p-3.5 rounded-2xl liquid-glass-subtle text-right">
+                    <span className="text-[10px] font-bold uppercase text-slate-600 block">
                       Volume Total Cadastrado
                     </span>
-                    <span className="text-xl font-extrabold text-emerald-400 font-mono">
+                    <span className="text-xl font-black text-emerald-700 font-mono">
                       {formatBRL(companyTotalValue)}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => onDeleteCompany(activeCompany.id)}
-                    className="p-3.5 rounded-2xl bg-zinc-950 hover:bg-rose-900/80 text-zinc-400 hover:text-rose-200 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
+                    className="p-3.5 rounded-2xl liquid-glass-pill text-slate-600 hover:text-rose-700 transition cursor-pointer"
                     title="Apagar esta empresa"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -297,15 +296,15 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
               {/* Quick Register Die Linked to This Company */}
               <form
                 onSubmit={handleCreateDieInCompany}
-                className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/90 space-y-3"
+                className="p-4 rounded-2xl liquid-glass-subtle space-y-3"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <Wrench className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <Wrench className="w-3.5 h-3.5 text-indigo-600" />
                     Vincular Nova Faca para {activeCompany.corporateName}
                   </span>
-                  <span className="text-[11px] text-zinc-500">
-                    Entra automaticamente em "Arquivo Recebido"
+                  <span className="text-[11px] font-medium text-slate-600">
+                    Entra em &quot;Arquivo Recebido&quot;
                   </span>
                 </div>
 
@@ -340,13 +339,13 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                           type="button"
                           key={mod}
                           onClick={() => setToolModality(mod)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold border transition cursor-pointer ${
                             active
-                              ? 'bg-rose-800 text-white border-rose-600'
-                              : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-slate-200'
+                              ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-white/40 shadow-sm'
+                              : 'liquid-glass-pill text-slate-700'
                           }`}
                         >
-                          [{meta.label}]
+                          {meta.label}
                         </button>
                       );
                     })}
@@ -354,7 +353,7 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
 
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-800 hover:bg-rose-700 text-white flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                    className="px-4 py-2 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-md flex items-center gap-1.5 transition cursor-pointer shrink-0"
                   >
                     <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                     <span>Cadastrar Faca</span>
@@ -364,12 +363,12 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
 
               {/* History List of Dies for this Company */}
               <div className="space-y-2.5">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-                  Histórico de Facas Associadas ({companyOrders.length})
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                  Histórico de Facas Associadas • {companyOrders.length}
                 </h4>
 
                 {companyOrders.length === 0 ? (
-                  <div className="p-8 rounded-2xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                  <div className="p-8 rounded-2xl border border-dashed border-white/70 text-center text-xs font-medium text-slate-600">
                     Nenhuma faca cadastrada para esta empresa ainda.
                   </div>
                 ) : (
@@ -379,27 +378,27 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                     return (
                       <div
                         key={order.id}
-                        className="p-4 rounded-2xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        className="p-4 rounded-2xl liquid-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="px-2 py-0.5 rounded-lg bg-rose-950/80 border border-rose-800/60 font-mono text-xs font-bold text-rose-300">
+                            <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
                               {order.id}
                             </span>
                             <span
-                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${modMeta?.badgeClass}`}
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${modMeta?.badgeClass}`}
                             >
-                              [{modMeta?.label}]
+                              {modMeta?.label}
                             </span>
-                            <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                              <Layers className="w-3 h-3 text-rose-400" />
+                            <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                              <Layers className="w-3 h-3 text-indigo-600" />
                               {stageMeta?.label}
                             </span>
                           </div>
-                          <p className="text-sm font-semibold text-slate-100">
+                          <p className="text-sm font-extrabold text-slate-900">
                             {order.toolDescription}
                           </p>
-                          <p className="text-[11px] text-zinc-500">
+                          <p className="text-[11px] font-medium text-slate-600">
                             Cadastrada em {formatDateBR(order.createdAt)} • Vencimento:{' '}
                             {formatDateBR(order.dueDate)}
                           </p>
@@ -407,17 +406,17 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
 
                         <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
                           <div className="text-right font-mono">
-                            <span className="text-base font-extrabold text-emerald-400 block">
+                            <span className="text-base font-black text-emerald-700 block">
                               {formatBRL(order.amount)}
                             </span>
-                            <span className="text-[10px] text-zinc-500">
+                            <span className="text-[10px] font-medium text-slate-600">
                               Atualizado: {order.stageUpdatedAt}
                             </span>
                           </div>
                           <button
                             type="button"
                             onClick={() => onDeleteOrder(order.id)}
-                            className="p-2 rounded-xl bg-zinc-900 hover:bg-rose-900/80 text-zinc-500 hover:text-rose-200 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
+                            className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
                             title="Apagar esta OS / Faca"
                           >
                             <Trash2 className="w-4 h-4" />

@@ -1,12 +1,14 @@
 import {
+  DieOrder,
   EnterpriseDatabase,
+  ProductionStage,
   RealtimeSyncEvent,
   TenantAccount,
   UserRole,
 } from '../types/order';
 
 const SUPABASE_CONFIG_KEY = 'facasflow_supabase_config_v1';
-const CLIENT_INSTANCE_ID = `client_${Math.random().toString(36).slice(2, 10)}`;
+export const CLIENT_INSTANCE_ID = `client_${Math.random().toString(36).slice(2, 10)}`;
 
 export interface SupabaseRealtimeConfig {
   url: string;
@@ -37,24 +39,53 @@ export function saveSupabaseConfig(config: SupabaseRealtimeConfig): void {
   }
 }
 
-// Active Supabase channel reference if connected
 let activeSupabaseChannel: any = null;
 let activeSupabaseClient: any = null;
 let activeBroadcastChannel: BroadcastChannel | null = null;
+let activeSubscriptionCount = 0;
+
+export function getActiveRealtimeChannelCount(): number {
+  return activeSubscriptionCount;
+}
+
+export function isSupabaseCloudActive(): boolean {
+  return Boolean(activeSupabaseClient && activeSupabaseChannel);
+}
 
 /**
- * Publish a real-time update for Sections 2 (Esteira), 4 (Entregas), 5 (Retornos), or Equipe
- * across Supabase Realtime, BroadcastChannel, StorageEvent, and Local Server SSE.
+ * Call Postgres RPC mover_faca(p_id, p_etapa, p_stage_updated_at) when Supabase is connected.
+ */
+export async function moveOrderStageViaRpc(
+  orderId: string,
+  targetStage: ProductionStage,
+  stageUpdatedAt: string
+): Promise<{ version?: number; updated_at?: string } | null> {
+  if (!activeSupabaseClient) return null;
+  const { data, error } = await activeSupabaseClient.rpc('mover_faca', {
+    p_id: orderId,
+    p_etapa: targetStage,
+    p_stage_updated_at: stageUpdatedAt,
+  });
+  if (error) {
+    throw error;
+  }
+  return data || null;
+}
+
+/**
+ * Publish a real-time update across BroadcastChannel, localStorage event, and Supabase Broadcast.
+ * Does NOT write to REST API.
  */
 export function publishRealtimeUpdate(params: {
   company_id: string;
-  section: 'esteira' | 'entregas' | 'retornos' | 'equipe' | 'all';
+  section: 'esteira' | 'entregas' | 'retornos' | 'estoque' | 'notas' | 'financeiro' | 'equipe' | 'all';
   actionLabel: string;
   actorName: string;
   actorRole: UserRole;
-  db: EnterpriseDatabase;
+  order?: DieOrder;
+  db?: EnterpriseDatabase;
 }): void {
-  const event: RealtimeSyncEvent & { senderInstanceId: string } = {
+  const event: RealtimeSyncEvent = {
     eventId: `rt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     senderInstanceId: CLIENT_INSTANCE_ID,
     company_id: params.company_id,
@@ -63,6 +94,7 @@ export function publishRealtimeUpdate(params: {
     actorName: params.actorName,
     actorRole: params.actorRole,
     timestamp: new Date().toISOString(),
+    order: params.order,
     db: params.db,
   };
 
@@ -79,7 +111,7 @@ export function publishRealtimeUpdate(params: {
     // ignore
   }
 
-  // 2. LocalStorage Realtime Event key (triggers 'storage' event in other tabs)
+  // 2. LocalStorage Realtime Event key (triggers 'storage' event in other tabs only)
   try {
     window.localStorage.setItem(
       `facasflow_rt_event_${params.company_id}`,
@@ -89,7 +121,7 @@ export function publishRealtimeUpdate(params: {
     // ignore
   }
 
-  // 3. Supabase Realtime Channel Broadcast + Optional Table Upsert
+  // 3. Supabase Broadcast (skip full-blob upsert for single-card moves)
   try {
     if (activeSupabaseChannel) {
       activeSupabaseChannel.send({
@@ -98,7 +130,7 @@ export function publishRealtimeUpdate(params: {
         payload: event,
       });
     }
-    if (activeSupabaseClient) {
+    if (activeSupabaseClient && params.db && !params.order) {
       activeSupabaseClient
         .from('facasflow_tenant_state')
         .upsert(
@@ -120,7 +152,8 @@ export function publishRealtimeUpdate(params: {
 }
 
 /**
- * Subscribe to real-time updates for a specific `company_id` (Sections 2, 4, 5 & Team)
+ * Subscribe to real-time updates for a specific `company_id`.
+ * Strictly read-only listener: updates local UI state only, never writes back to DB.
  */
 export function subscribeToCompanyRealtime(
   company_id: string,
@@ -128,60 +161,57 @@ export function subscribeToCompanyRealtime(
   onConnectionStatusChange?: (status: 'connected' | 'supabase_live' | 'reconnecting') => void
 ): () => void {
   let isDisposed = false;
-  let lastSeenEventId = '';
+  const seenEvents = new Set<string>();
+  let localBroadcast: BroadcastChannel | null = null;
+  let localSupabaseClient: any = null;
+  let localSupabaseChannel: any = null;
+
+  activeSubscriptionCount += 1;
 
   const handleIncoming = (rawEvent: any) => {
     if (isDisposed || !rawEvent) return;
-    if (rawEvent.senderInstanceId === CLIENT_INSTANCE_ID) return;
+    if (rawEvent.senderInstanceId && rawEvent.senderInstanceId === CLIENT_INSTANCE_ID) {
+      return;
+    }
     if (rawEvent.company_id !== company_id) return;
-    if (rawEvent.eventId && rawEvent.eventId === lastSeenEventId) return;
-    if (!rawEvent.db || !Array.isArray(rawEvent.db.orders)) return;
+    if (rawEvent.eventId) {
+      if (seenEvents.has(rawEvent.eventId)) return;
+      seenEvents.add(rawEvent.eventId);
+      if (seenEvents.size > 200) {
+        const first = seenEvents.values().next().value;
+        if (first) seenEvents.delete(first);
+      }
+    }
+    if (!rawEvent.order && (!rawEvent.db || !Array.isArray(rawEvent.db.orders))) {
+      return;
+    }
 
-    lastSeenEventId = rawEvent.eventId || String(Date.now());
     onRemoteUpdate(rawEvent as RealtimeSyncEvent);
   };
 
-  // 1. Setup BroadcastChannel
+  // 1. BroadcastChannel
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       if (activeBroadcastChannel) {
         activeBroadcastChannel.close();
       }
-      activeBroadcastChannel = new BroadcastChannel(`facasflow_rt_${company_id}`);
-      activeBroadcastChannel.onmessage = (msg) => {
+      localBroadcast = new BroadcastChannel(`facasflow_rt_${company_id}`);
+      localBroadcast.onmessage = (msg) => {
         handleIncoming(msg.data);
       };
+      activeBroadcastChannel = localBroadcast;
       onConnectionStatusChange?.('connected');
     } catch {
       // ignore
     }
   }
 
-  // 2. Setup Window Storage Event Listener (fires when another tab modifies localStorage)
+  // 2. StorageEvent (fires only in OTHER tabs)
   const storageHandler = (e: StorageEvent) => {
     if (!e.newValue) return;
     if (e.key === `facasflow_rt_event_${company_id}`) {
       try {
-        const parsed = JSON.parse(e.newValue);
-        handleIncoming(parsed);
-      } catch {
-        // ignore
-      }
-    } else if (e.key === `facasflow_tenant_db_${company_id}`) {
-      try {
-        const parsedDb = JSON.parse(e.newValue) as EnterpriseDatabase;
-        if (parsedDb && parsedDb.company_id === company_id) {
-          handleIncoming({
-            eventId: `storage_${Date.now()}`,
-            company_id,
-            section: 'all',
-            actionLabel: 'Sincronização em tempo real recebida',
-            actorName: 'Equipe',
-            actorRole: 'operador',
-            timestamp: new Date().toISOString(),
-            db: parsedDb,
-          });
-        }
+        handleIncoming(JSON.parse(e.newValue));
       } catch {
         // ignore
       }
@@ -189,7 +219,7 @@ export function subscribeToCompanyRealtime(
   };
   window.addEventListener('storage', storageHandler);
 
-  // 3. Setup Server-Sent Events (SSE) if running on localhost server.cjs
+  // 3. Server-Sent Events (SSE) for localhost server.cjs
   let sseSource: EventSource | null = null;
   if (
     typeof EventSource !== 'undefined' &&
@@ -202,8 +232,7 @@ export function subscribeToCompanyRealtime(
       );
       sseSource.onmessage = (evt) => {
         try {
-          const data = JSON.parse(evt.data);
-          handleIncoming(data);
+          handleIncoming(JSON.parse(evt.data));
         } catch {
           // ignore
         }
@@ -213,7 +242,7 @@ export function subscribeToCompanyRealtime(
     }
   }
 
-  // 4. Setup Supabase Realtime Channel (Broadcast + Postgres Changes for Sections 2, 4, 5)
+  // 4. Supabase Realtime Channel (normalized orders changes + broadcast)
   const supaCfg = getSupabaseConfig();
   if (supaCfg.enabled && supaCfg.url.trim() && supaCfg.anonKey.trim()) {
     const dynamicImport = new Function('url', 'return import(url)');
@@ -224,29 +253,17 @@ export function subscribeToCompanyRealtime(
         const client = createClient(supaCfg.url.trim(), supaCfg.anonKey.trim(), {
           realtime: { params: { eventsPerSecond: 20 } },
         });
+        localSupabaseClient = client;
         activeSupabaseClient = client;
 
-        // Fetch latest state from Supabase table if available
-        client
-          .from('facasflow_tenant_state')
-          .select('db_payload, last_action, last_actor, updated_at')
-          .eq('company_id', company_id)
-          .maybeSingle()
-          .then(({ data }: any) => {
-            if (!isDisposed && data?.db_payload) {
-              handleIncoming({
-                eventId: `supa_init_${data.updated_at}`,
-                company_id,
-                section: 'all',
-                actionLabel: data.last_action || 'Sincronizado via Supabase',
-                actorName: data.last_actor || 'Supabase Cloud',
-                actorRole: 'operador',
-                timestamp: data.updated_at || new Date().toISOString(),
-                db: data.db_payload,
-              });
-            }
-          })
-          .catch(() => {});
+        if (activeSupabaseChannel) {
+          try {
+            client.removeChannel(activeSupabaseChannel);
+          } catch {
+            // ignore
+          }
+          activeSupabaseChannel = null;
+        }
 
         const channel = client
           .channel(`facasflow_company_${company_id}`, {
@@ -260,23 +277,41 @@ export function subscribeToCompanyRealtime(
           .on(
             'postgres_changes',
             {
-              event: '*',
+              event: 'UPDATE',
               schema: 'public',
-              table: 'facasflow_tenant_state',
+              table: 'orders',
               filter: `company_id=eq.${company_id}`,
             },
             (change: any) => {
               const row = change?.new;
-              if (row && row.db_payload) {
+              if (row && row.id && row.stage) {
                 handleIncoming({
-                  eventId: `pg_${row.updated_at || Date.now()}`,
+                  eventId: `pg_order_${row.id}_v${row.version || row.updated_at || Date.now()}`,
                   company_id,
-                  section: 'all',
-                  actionLabel: row.last_action || 'Atualização Supabase Realtime',
-                  actorName: row.last_actor || 'Produção',
+                  section: 'esteira',
+                  actionLabel: '',
+                  actorName: '',
                   actorRole: 'operador',
                   timestamp: row.updated_at || new Date().toISOString(),
-                  db: row.db_payload,
+                  order: {
+                    id: row.id,
+                    company_id: row.company_id,
+                    companyId: row.client_company_id || '',
+                    companyName: row.company_name || '',
+                    companyPhone: row.company_phone || '',
+                    toolDescription: row.tool_description || '',
+                    amount: Number(row.amount) || 0,
+                    paymentModality: row.payment_modality,
+                    paymentStatus: row.payment_status,
+                    stage: row.stage,
+                    stageUpdatedAt: row.stage_updated_at || '',
+                    stageHistory: [],
+                    version: Number(row.version) || 1,
+                    updatedAt: row.updated_at || new Date().toISOString(),
+                    createdAt: row.created_at || '',
+                    dueDate: row.due_date || '',
+                    paidAt: row.paid_at || undefined,
+                  },
                 });
               }
             }
@@ -287,38 +322,51 @@ export function subscribeToCompanyRealtime(
             }
           });
 
+        if (isDisposed) {
+          try {
+            client.removeChannel(channel);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        localSupabaseChannel = channel;
         activeSupabaseChannel = channel;
       })
       .catch(() => {
-        // Fallback to native BroadcastChannel/Storage realtime
+        // Fallback to local channels
       });
   }
 
   return () => {
     isDisposed = true;
+    activeSubscriptionCount = Math.max(0, activeSubscriptionCount - 1);
     window.removeEventListener('storage', storageHandler);
     if (sseSource) {
       sseSource.close();
       sseSource = null;
     }
-    if (activeBroadcastChannel) {
-      activeBroadcastChannel.close();
-      activeBroadcastChannel = null;
+    if (localBroadcast) {
+      localBroadcast.close();
+      if (activeBroadcastChannel === localBroadcast) {
+        activeBroadcastChannel = null;
+      }
+      localBroadcast = null;
     }
-    if (activeSupabaseClient && activeSupabaseChannel) {
+    if (localSupabaseClient && localSupabaseChannel) {
       try {
-        activeSupabaseClient.removeChannel(activeSupabaseChannel);
+        localSupabaseClient.removeChannel(localSupabaseChannel);
       } catch {
         // ignore
       }
-      activeSupabaseChannel = null;
+      if (activeSupabaseChannel === localSupabaseChannel) {
+        activeSupabaseChannel = null;
+      }
+      localSupabaseChannel = null;
     }
   };
 }
 
-/**
- * Sync employee accounts across Supabase / BroadcastChannel for the same company
- */
 export function broadcastEmployeeRegistryUpdate(accounts: TenantAccount[]): void {
   try {
     window.localStorage.setItem(

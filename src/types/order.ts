@@ -8,12 +8,12 @@ export type ProductionStage =
 
 export type PaymentModality =
   | 'pix'
-  | 'a_prazo'
+  | 'boleto'
   | 'dinheiro'
   | 'cartao'
-  | 'cortesia';
+  | 'nao_pago';
 
-export type PaymentStatus = 'pago' | 'a_receber' | 'vencido' | 'sem_nota' | 'cortesia';
+export type PaymentStatus = 'pago' | 'a_receber' | 'vencido' | 'sem_nota' | 'nao_pago';
 
 export type DeliveryMethod =
   | 'cliente_buscou'
@@ -23,7 +23,7 @@ export type DeliveryMethod =
 
 export type ReturnStatus = 'em_analise' | 'em_ajuste' | 'liberado';
 
-export type UserRole = 'admin' | 'operador';
+export type UserRole = 'admin' | 'operador' | 'cliente';
 
 export type ActiveSection =
   | 'bento_home'
@@ -32,7 +32,54 @@ export type ActiveSection =
   | 'financeiro'
   | 'entregas'
   | 'retornos'
+  | 'estoque'
+  | 'notas'
   | 'equipe';
+
+export type NoteStatus = 'rascunho' | 'emitida' | 'impressa' | 'cancelada';
+
+export interface NoteItem {
+  id: string;
+  descricao: string;
+  quantidade: number;
+  precoUnitario: number;
+  total: number;
+}
+
+export interface NoteRecord {
+  id: string;
+  company_id?: string;
+  numero: number;
+  data: string; // YYYY-MM-DD
+  empresaId?: string;
+  clienteNome: string;
+  cnpj: string;
+  contato: string;
+  endereco?: string;
+  entreguePor?: string;
+  osId?: string;
+  status: NoteStatus;
+  items: NoteItem[];
+  total: number;
+  criadoPor: string;
+  criadoEm: string;
+}
+
+export type StockCategory = 'madeiras' | 'laminas';
+
+export interface StockItem {
+  id: string; // e.g., "EST-001"
+  company_id?: string;
+  category: StockCategory;
+  name: string;
+  quantity: number;
+  unit: string;
+  minStock: number;
+  supplier: string;
+  unitCost: number;
+  entryDate: string; // YYYY-MM-DD
+  updatedAt: string;
+}
 
 export interface TenantAccount {
   id?: string; // ID do usuário (ex: "USR-001")
@@ -87,6 +134,8 @@ export interface DieOrder {
   stage: ProductionStage;
   stageUpdatedAt: string; // Data/hora da última movimentação na esteira
   stageHistory: StageLog[];
+  version?: number;
+  updatedAt?: string; // ISO timestamp monotônico para descarte de eventos antigos
   createdAt: string; // YYYY-MM-DD
   dueDate: string; // YYYY-MM-DD
   paidAt?: string;
@@ -118,6 +167,61 @@ export interface WarrantyReturnRecord {
   updatedAt: string;
 }
 
+export type ExpenseCategoryKey =
+  | 'aluguel'
+  | 'agua'
+  | 'energia'
+  | 'internet'
+  | 'alimentacao'
+  | 'combustivel'
+  | 'manutencao'
+  | 'contador'
+  | 'marketing'
+  | 'financiamento';
+
+export interface MonthlyExpenseRecord {
+  month: string; // YYYY-MM
+  values: Record<ExpenseCategoryKey, number>;
+  updatedAt: string;
+}
+
+export type ServiceProviderStatus = 'pendente' | 'pago' | 'atrasado';
+
+export interface ServiceProviderRecord {
+  id: string; // e.g., "PST-001"
+  company_id?: string;
+  name: string;
+  service: string;
+  amount: number;
+  paymentModality: PaymentModality;
+  dueDate: string; // YYYY-MM-DD
+  status: ServiceProviderStatus;
+  updatedAt: string;
+}
+
+export interface PayrollEmployeeRecord {
+  id: string; // e.g., "FUN-001"
+  company_id?: string;
+  name: string;
+  roleTitle: string;
+  salary: number;
+  admissionDate: string; // YYYY-MM-DD
+  updatedAt: string;
+}
+
+export type InvestmentType = 'renda_fixa' | 'acoes' | 'fii' | 'outro';
+
+export interface InvestmentRecord {
+  id: string; // e.g., "INV-001"
+  company_id?: string;
+  assetName: string;
+  assetType: InvestmentType;
+  appliedDate: string; // YYYY-MM-DD
+  investedAmount: number;
+  currentAmount: number;
+  updatedAt: string;
+}
+
 export interface EnterpriseDatabase {
   version: number;
   company_id: string; // Strict tenant isolation key
@@ -125,16 +229,25 @@ export interface EnterpriseDatabase {
   orders: DieOrder[];
   deliveries: DeliveryRecord[];
   returns: WarrantyReturnRecord[];
+  stock?: StockItem[];
+  notas?: NoteRecord[];
+  noteSequence?: number;
+  expenses?: MonthlyExpenseRecord[];
+  serviceProviders?: ServiceProviderRecord[];
+  payrollEmployees?: PayrollEmployeeRecord[];
+  investments?: InvestmentRecord[];
   employees?: TenantAccount[];
 }
 
 export interface RealtimeSyncEvent {
   eventId: string;
+  senderInstanceId?: string;
   company_id: string;
-  section: 'esteira' | 'entregas' | 'retornos' | 'equipe' | 'all';
+  section: 'esteira' | 'entregas' | 'retornos' | 'estoque' | 'notas' | 'financeiro' | 'equipe' | 'all';
   actionLabel: string;
   actorName: string;
   actorRole: UserRole;
   timestamp: string;
-  db: EnterpriseDatabase;
+  order?: DieOrder;
+  db?: EnterpriseDatabase;
 }

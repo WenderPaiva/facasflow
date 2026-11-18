@@ -4,11 +4,17 @@ import {
 } from '../data/seedOrders';
 import {
   AuthSession,
+  DieOrder,
   EnterpriseDatabase,
+  ProductionStage,
   TenantAccount,
   UserRole,
 } from '../types/order';
-import { normalizeOrderPaymentStatus } from '../utils/financeEngine';
+import {
+  migratePaymentModality,
+  normalizeOrderPaymentStatus,
+} from '../utils/financeEngine';
+import { CLIENT_INSTANCE_ID } from './realtimeEngine';
 
 const TENANTS_REGISTRY_KEY = 'facasflow_saas_tenants_v1';
 const ACTIVE_SESSION_KEY = 'facasflow_active_session_v1';
@@ -494,7 +500,17 @@ function normalizeDb(
       .map((c) => ({ ...c, company_id })),
     orders: (Array.isArray(db.orders) ? db.orders : [])
       .filter((o) => !o.company_id || o.company_id === company_id)
-      .map((o) => normalizeOrderPaymentStatus({ ...o, company_id }))
+      .map((o) => {
+        const normalizedOrder = normalizeOrderPaymentStatus({ ...o, company_id });
+        return {
+          ...normalizedOrder,
+          version: Number(normalizedOrder.version) || 1,
+          updatedAt:
+            normalizedOrder.updatedAt ||
+            normalizedOrder.createdAt ||
+            new Date().toISOString(),
+        };
+      })
       .sort((a, b) => {
         const nA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
         const nB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
@@ -506,6 +522,72 @@ function normalizeDb(
     returns: (Array.isArray(db.returns) ? db.returns : [])
       .filter((r) => !r.company_id || r.company_id === company_id)
       .map((r) => ({ ...r, company_id })),
+    stock: (Array.isArray(db.stock) ? db.stock : [])
+      .filter((s) => !s.company_id || s.company_id === company_id)
+      .map((s) => ({
+        ...s,
+        company_id,
+        category: s.category === 'laminas' ? 'laminas' : 'madeiras',
+        quantity: Number(s.quantity) || 0,
+        minStock: Number(s.minStock) || 0,
+        unitCost: Number(s.unitCost) || 0,
+      })),
+    notas: (Array.isArray(db.notas) ? db.notas : [])
+      .filter((n) => !n.company_id || n.company_id === company_id)
+      .map((n) => {
+        const items = (Array.isArray(n.items) ? n.items : []).map((it) => {
+          const quantidade = Math.max(0, Number(it.quantidade) || 0);
+          const precoUnitario = Math.max(0, Number(it.precoUnitario) || 0);
+          return {
+            ...it,
+            quantidade,
+            precoUnitario,
+            total: Math.round(quantidade * precoUnitario * 100) / 100,
+          };
+        });
+        const recomputedTotal =
+          Math.round(items.reduce((sum, it) => sum + it.total, 0) * 100) / 100;
+        return {
+          ...n,
+          company_id,
+          numero: Number(n.numero) || 1,
+          items,
+          total: recomputedTotal,
+        };
+      })
+      .sort((a, b) => b.numero - a.numero),
+    noteSequence: Math.max(
+      Number(db.noteSequence) || 0,
+      ...(Array.isArray(db.notas) ? db.notas.map((n) => Number(n.numero) || 0) : [0])
+    ),
+    expenses: (Array.isArray(db.expenses) ? db.expenses : []).map((exp) => ({
+      ...exp,
+      month: String(exp.month || ''),
+      values: exp.values || ({} as any),
+    })),
+    serviceProviders: (Array.isArray(db.serviceProviders) ? db.serviceProviders : [])
+      .filter((p) => !p.company_id || p.company_id === company_id)
+      .map((p) => ({
+        ...p,
+        company_id,
+        amount: Number(p.amount) || 0,
+        paymentModality: migratePaymentModality(String(p.paymentModality || 'pix')),
+      })),
+    payrollEmployees: (Array.isArray(db.payrollEmployees) ? db.payrollEmployees : [])
+      .filter((e) => !e.company_id || e.company_id === company_id)
+      .map((e) => ({
+        ...e,
+        company_id,
+        salary: Number(e.salary) || 0,
+      })),
+    investments: (Array.isArray(db.investments) ? db.investments : [])
+      .filter((inv) => !inv.company_id || inv.company_id === company_id)
+      .map((inv) => ({
+        ...inv,
+        company_id,
+        investedAmount: Number(inv.investedAmount) || 0,
+        currentAmount: Number(inv.currentAmount) || 0,
+      })),
     employees: mergedEmployees,
   };
 }
@@ -555,9 +637,9 @@ export function loadEnterpriseDatabase(
 }
 
 /**
- * Save database strictly isolated under `facasflow_tenant_db_${db.company_id}`
+ * Update ONLY the local browser cache (never triggers HTTP PUT or SSE broadcast).
  */
-export function saveEnterpriseDatabase(
+export function saveEnterpriseDatabaseLocalOnly(
   db: EnterpriseDatabase
 ): EnterpriseDatabase {
   const company_id = db.company_id || 'tenant_qualifacas';
@@ -570,15 +652,71 @@ export function saveEnterpriseDatabase(
     // ignore quota issues
   }
 
+  return normalized;
+}
+
+/**
+ * Save database strictly isolated under `facasflow_tenant_db_${db.company_id}`
+ */
+export function saveEnterpriseDatabase(
+  db: EnterpriseDatabase
+): EnterpriseDatabase {
+  const company_id = db.company_id || 'tenant_qualifacas';
+  const normalized = saveEnterpriseDatabaseLocalOnly(db);
+
   if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+    const active = getActiveSession();
     fetch(`/api/orders?company_id=${encodeURIComponent(company_id)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-FacasFlow-Role': active?.role || 'admin',
+        'X-FacasFlow-Email': active?.email || '',
+        'X-FacasFlow-Client-Id': CLIENT_INSTANCE_ID,
+      },
       body: JSON.stringify(normalized),
     }).catch(() => {});
   }
 
   return normalized;
+}
+
+/**
+ * Atomic single-card stage move endpoint (mirrors Postgres RPC mover_faca).
+ */
+export async function moveOrderStageOnServer(params: {
+  company_id: string;
+  orderId: string;
+  targetStage: ProductionStage;
+  stageUpdatedAt: string;
+}): Promise<DieOrder | null> {
+  if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
+    return null;
+  }
+  const active = getActiveSession();
+  const res = await fetch(
+    `/api/orders/move?company_id=${encodeURIComponent(params.company_id)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-FacasFlow-Role': active?.role || 'admin',
+        'X-FacasFlow-Email': active?.email || '',
+        'X-FacasFlow-Client-Id': CLIENT_INSTANCE_ID,
+      },
+      body: JSON.stringify({
+        company_id: params.company_id,
+        orderId: params.orderId,
+        stage: params.targetStage,
+        stageUpdatedAt: params.stageUpdatedAt,
+      }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Move stage failed with HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data?.order || null;
 }
 
 export function getNextOrderId(db: EnterpriseDatabase): string {
@@ -606,4 +744,48 @@ export function getNextReturnId(db: EnterpriseDatabase): string {
     if (!Number.isNaN(num) && num > max) max = num;
   }
   return `RET-${String(max + 1).padStart(3, '0')}`;
+}
+
+export function getNextStockId(db: EnterpriseDatabase): string {
+  let max = 0;
+  for (const s of db.stock || []) {
+    const num = parseInt(s.id.replace(/\D/g, ''), 10);
+    if (!Number.isNaN(num) && num > max) max = num;
+  }
+  return `EST-${String(max + 1).padStart(3, '0')}`;
+}
+
+export function getNextProviderId(db: EnterpriseDatabase): string {
+  let max = 0;
+  for (const p of db.serviceProviders || []) {
+    const num = parseInt(p.id.replace(/\D/g, ''), 10);
+    if (!Number.isNaN(num) && num > max) max = num;
+  }
+  return `PST-${String(max + 1).padStart(3, '0')}`;
+}
+
+export function getNextPayrollEmployeeId(db: EnterpriseDatabase): string {
+  let max = 0;
+  for (const e of db.payrollEmployees || []) {
+    const num = parseInt(e.id.replace(/\D/g, ''), 10);
+    if (!Number.isNaN(num) && num > max) max = num;
+  }
+  return `FUN-${String(max + 1).padStart(3, '0')}`;
+}
+
+export function getNextInvestmentId(db: EnterpriseDatabase): string {
+  let max = 0;
+  for (const i of db.investments || []) {
+    const num = parseInt(i.id.replace(/\D/g, ''), 10);
+    if (!Number.isNaN(num) && num > max) max = num;
+  }
+  return `INV-${String(max + 1).padStart(3, '0')}`;
+}
+
+export function getNextNoteNumber(db: EnterpriseDatabase): number {
+  let max = Number(db.noteSequence) || 0;
+  for (const n of db.notas || []) {
+    if (Number(n.numero) > max) max = Number(n.numero);
+  }
+  return max + 1;
 }

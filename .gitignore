@@ -1,0 +1,5 @@
+node_modules/
+data/facasflow-db-*.json
+.env
+.env.*
+*.log

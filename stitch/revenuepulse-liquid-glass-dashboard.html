@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RevenuePulse AI - Analytics Dashboard</title>
+<!-- Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#EEF2FF',
+              100: '#E0E7FF',
+              500: '#6366F1',
+              600: '#4F46E5',
+              700: '#4338CA',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="liquid-glass-aesthetics">
+    /* Liquid Glass Canvas Background with Morphing Fluid Orbs */
+    .liquid-canvas {
+      background: radial-gradient(circle at 15% 15%, #dbeafe 0%, #bfdbfe 30%, #c7d2fe 65%, #a5b4fc 100%);
+      min-height: 100vh;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Ambient animated fluid glow blobs */
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      pointer-events: none;
+      opacity: 0.75;
+      mix-blend-mode: multiply;
+      will-change: transform;
+    }
+
+    .blob-1 {
+      top: -10%;
+      left: 10%;
+      width: 620px;
+      height: 620px;
+      background: radial-gradient(circle, #4f46e5 0%, #818cf8 60%, rgba(99, 102, 241, 0) 80%);
+      animation: morph-float-1 22s ease-in-out infinite alternate;
+    }
+
+    .blob-2 {
+      top: 35%;
+      right: -8%;
+      width: 680px;
+      height: 680px;
+      background: radial-gradient(circle, #06b6d4 0%, #38bdf8 50%, rgba(56, 189, 248, 0) 75%);
+      animation: morph-float-2 26s ease-in-out infinite alternate;
+    }
+
+    .blob-3 {
+      bottom: -10%;
+      left: 25%;
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle, #9333ea 0%, #c084fc 50%, rgba(192, 132, 252, 0) 80%);
+      animation: morph-float-3 28s ease-in-out infinite alternate;
+    }
+
+    .blob-4 {
+      top: 50%;
+      left: 5%;
+      width: 480px;
+      height: 480px;
+      background: radial-gradient(circle, #2563eb 0%, #60a5fa 60%, rgba(37, 99, 235, 0) 80%);
+      animation: morph-float-1 30s ease-in-out infinite alternate-reverse;
+    }
+
+    .blob-5 {
+      top: 15%;
+      right: 32%;
+      width: 440px;
+      height: 440px;
+      background: radial-gradient(circle, #10b981 0%, #34d399 50%, rgba(52, 211, 153, 0) 75%);
+      opacity: 0.55;
+      animation: morph-float-2 20s ease-in-out infinite alternate-reverse;
+    }
+
+    @keyframes morph-float-1 {
+      0% { transform: translate(0px, 0px) scale(1) rotate(0deg); border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%; }
+      50% { transform: translate(60px, 80px) scale(1.12) rotate(120deg); border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+      100% { transform: translate(-50px, 40px) scale(0.92) rotate(240deg); border-radius: 35% 65% 55% 45% / 50% 60% 40% 50%; }
+    }
+
+    @keyframes morph-float-2 {
+      0% { transform: translate(0px, 0px) scale(1.05) rotate(0deg); border-radius: 50% 50% 30% 70% / 55% 45% 55% 45%; }
+      50% { transform: translate(-70px, -60px) scale(0.95) rotate(-110deg); border-radius: 38% 62% 63% 37% / 41% 44% 56% 59%; }
+      100% { transform: translate(40px, 70px) scale(1.15) rotate(180deg); border-radius: 63% 37% 40% 60% / 70% 38% 62% 30%; }
+    }
+
+    @keyframes morph-float-3 {
+      0% { transform: translate(0px, 0px) scale(0.95); border-radius: 60% 40% 55% 45% / 40% 55% 45% 60%; }
+      50% { transform: translate(80px, -50px) scale(1.08); border-radius: 40% 60% 35% 65% / 60% 40% 60% 40%; }
+      100% { transform: translate(-60px, -30px) scale(1.02); border-radius: 52% 48% 63% 37% / 45% 55% 45% 55%; }
+    }
+
+    /* Apple "Liquid Glass" iOS 26 Material */
+    .liquid-glass {
+      position: relative;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.14) 100%);
+      backdrop-filter: blur(32px) saturate(200%) brightness(1.08);
+      -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.08);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      box-shadow: 
+        inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.9),
+        inset 0 -1px 1.5px 0 rgba(255, 255, 255, 0.25),
+        inset 1px 0 2px 0 rgba(255, 255, 255, 0.35),
+        0 14px 34px -4px rgba(30, 41, 110, 0.16),
+        0 4px 16px rgba(15, 23, 42, 0.05);
+      transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .liquid-glass-subtle {
+      position: relative;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.10) 100%);
+      backdrop-filter: blur(24px) saturate(190%) brightness(1.05);
+      -webkit-backdrop-filter: blur(24px) saturate(190%) brightness(1.05);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 
+        inset 0 1px 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 -1px 1px 0 rgba(255, 255, 255, 0.15),
+        0 8px 24px -2px rgba(30, 41, 110, 0.1);
+    }
+
+    .liquid-glass-pill {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.16) 100%);
+      backdrop-filter: blur(24px) saturate(190%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 
+        inset 0 1px 1px rgba(255, 255, 255, 0.9),
+        0 4px 14px rgba(30, 41, 110, 0.1);
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .liquid-glass-pill:hover {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.24) 100%);
+      border-color: rgba(255, 255, 255, 0.85);
+      box-shadow: 
+        inset 0 1.5px 1.5px rgba(255, 255, 255, 0.95),
+        0 6px 20px rgba(79, 70, 229, 0.18);
+    }
+
+    /* Dynamic Specular Sheen on Hover */
+    .liquid-glass::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(circle 220px at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(255, 255, 255, 0.38), transparent 70%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      mix-blend-mode: overlay;
+    }
+
+    .liquid-glass:hover::after {
+      opacity: 1;
+    }
+
+    .liquid-glass-active:active {
+      transform: scale(0.975);
+    }
+
+    /* Optical Rim Highlights */
+    .liquid-rim {
+      border: 1px solid transparent;
+      background-clip: padding-box;
+      position: relative;
+    }
+
+    /* Crisp Frosted Typography Depth */
+    .frosted-text-depth {
+      text-shadow: 0 1px 1px rgba(255, 255, 255, 0.65);
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.45);
+      border-radius: 9999px;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.7);
+    }
+  </style>
+</head>
+<body class="liquid-canvas text-slate-900 font-sans antialiased relative overflow-x-hidden selection:bg-indigo-500 selection:text-white p-3 md:p-6 lg:p-7 min-h-screen">
+<!-- SVG Optical Refraction Filters (Hidden Reference) -->
+<svg aria-hidden="true" class="hidden" height="0" width="0">
+<filter id="liquid-refract">
+<feturbulence basefrequency="0.015 0.015" numoctaves="2" result="noise" type="fractalNoise"></feturbulence>
+<fedisplacementmap in="SourceGraphic" in2="noise" scale="3" xchannelselector="R" ychannelselector="G"></fedisplacementmap>
+</filter>
+<filter id="liquid-chromatic">
+<feoffset dx="0.8" dy="0" in="SourceGraphic" result="red"></feoffset>
+<feoffset dx="-0.8" dy="0" in="SourceGraphic" result="blue"></feoffset>
+<feblend in="red" in2="blue" mode="screen"></feblend>
+</filter>
+</svg>
+<!-- Vibrant Floating & Morphing Organic Gradient Blobs for Liquid Refraction -->
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+<div class="blob blob-4"></div>
+<div class="blob blob-5"></div>
+<!-- BEGIN: DashboardWrapper -->
+<div class="max-w-[1720px] mx-auto flex gap-5 relative z-10" data-purpose="dashboard-container">
+<!-- BEGIN: LeftSidebar -->
+<aside class="w-[245px] shrink-0 liquid-glass rounded-[28px] p-5 flex flex-col justify-between hidden lg:flex" data-purpose="sidebar">
+<!-- Top Section: Brand & Navigations -->
+<div class="space-y-6">
+<!-- Brand Logo -->
+<div class="flex items-center gap-3 px-2 py-1.5" data-purpose="brand-header">
+<div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-sky-400 p-[1.5px] shadow-md shadow-indigo-500/25 flex items-center justify-center">
+<div class="w-full h-full bg-white/90 backdrop-blur-md rounded-[10px] flex items-center justify-center">
+<svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" viewbox="0 0 24 24">
+<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+</svg>
+</div>
+</div>
+<div class="flex items-center">
+<span class="font-extrabold text-lg tracking-tight text-slate-900 frosted-text-depth">RevenuePulse</span>
+<span class="font-black text-lg text-indigo-600 ml-0.5 drop-shadow-[0_1px_8px_rgba(99,102,241,0.4)]">AI</span>
+</div>
+</div>
+<!-- Primary Navigation Pill -->
+<div>
+<a class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-gradient-to-r from-indigo-600/90 to-indigo-700 text-white font-semibold text-sm transition-all duration-300 shadow-lg shadow-indigo-600/30 border border-white/40 active:scale-[0.97]" data-purpose="nav-item-active" href="#">
+<svg class="w-4 h-4 text-white" fill="currentColor" viewbox="0 0 24 24">
+<rect height="7" rx="1.5" width="7" x="3" y="3"></rect>
+<rect height="7" rx="1.5" width="7" x="14" y="3"></rect>
+<rect height="7" rx="1.5" width="7" x="14" y="14"></rect>
+<rect height="7" rx="1.5" width="7" x="3" y="14"></rect>
+</svg>
+<span class="drop-shadow-sm">Overview</span>
+</a>
+</div>
+<!-- Section: ANALYTICS -->
+<div class="space-y-1">
+<div class="px-3 text-[11px] font-bold tracking-wider text-slate-600/90 uppercase frosted-text-depth">Analytics</div>
+<nav class="space-y-0.5">
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line></svg>
+<span>Reports</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+<span>Funnels</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+<span>Cohorts</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><line x1="18" x2="18" y1="20" y2="10"></line><line x1="12" x2="12" y1="20" y2="4"></line><line x1="6" x2="6" y1="20" y2="14"></line></svg>
+<span>Insights</span>
+</a>
+</nav>
+</div>
+<!-- Section: ENGAGEMENT -->
+<div class="space-y-1">
+<div class="px-3 text-[11px] font-bold tracking-wider text-slate-600/90 uppercase frosted-text-depth">Engagement</div>
+<nav class="space-y-0.5">
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" x2="19" y1="8" y2="14"></line><line x1="22" x2="16" y1="11" y2="11"></line></svg>
+<span>Users</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><rect height="14" rx="2" ry="2" width="20" x="2" y="7"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+<span>Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+<span>Segments</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="16"></line><line x1="8" x2="16" y1="12" y2="12"></line></svg>
+<span>Activity</span>
+</a>
+</nav>
+</div>
+<!-- Section: OPERATIONS -->
+<div class="space-y-1">
+<div class="px-3 text-[11px] font-bold tracking-wider text-slate-600/90 uppercase frosted-text-depth">Operations</div>
+<nav class="space-y-0.5">
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<span class="w-4 text-center text-xs font-bold text-slate-600">â‡„</span>
+<span>Integrations</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<span class="w-4 text-center text-xs font-bold text-slate-600">âš™</span>
+<span>Automations</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="m3 11 18-5v12L3 14v-3z"></path><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"></path></svg>
+<span>Campaigns</span>
+</a>
+</nav>
+</div>
+<!-- Section: SETTINGS -->
+<div class="space-y-1">
+<div class="px-3 text-[11px] font-bold tracking-wider text-slate-600/90 uppercase frosted-text-depth">Settings</div>
+<nav class="space-y-0.5">
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+<span>Teams</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+<span>Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3.5 py-2 text-sm font-semibold text-slate-800 hover:text-indigo-700 hover:bg-white/40 rounded-full transition-all duration-200 active:scale-95" href="#">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><rect height="16" rx="2" ry="2" width="22" x="1" y="4"></rect><line x1="1" x2="23" y1="10" y2="10"></line></svg>
+<span>Billings</span>
+</a>
+</nav>
+</div>
+</div>
+<!-- User Profile Box -->
+<div class="pt-4 border-t border-white/60 flex items-center justify-between" data-purpose="user-profile">
+<div class="flex items-center gap-3">
+<div class="relative">
+<img alt="Alex Morgan" class="w-9 h-9 rounded-full object-cover ring-2 ring-white/90 shadow-md" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA5BD7Lgfhcy0KRvDRrjguWLmdMS2MTUDe6PZ-s2K3AwAsEzlmWN5ThI_TDLYYXbXHZLY2MODYsnYlmj3S_mVGy7SZEWJSywCcKsnWbVT_D7WZEkkr_8VkY3W8KXn7jBds9s5_sQstUVRbasuUwMOEPGSBkEkYMFI126ib64bxcojDxWi0wVUb1qXt9xeWsNfTZf5d9Zh3bo8BaQz1RFKcnkH1tE3xcaCKFPNYbVBHZ"/>
+<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white shadow-sm"></span>
+</div>
+<div class="text-left leading-tight">
+<p class="text-xs font-bold text-slate-900 frosted-text-depth">Alex Morgan</p>
+<p class="text-[11px] text-slate-600 font-semibold">Admin</p>
+</div>
+</div>
+<button class="text-slate-500 hover:text-slate-800 p-1.5 rounded-full hover:bg-white/40 transition">
+<svg class="w-4 h-4" fill="currentColor" viewbox="0 0 24 24"><circle cx="12" cy="5" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="12" cy="19" r="1.7"></circle></svg>
+</button>
+</div>
+</aside>
+<!-- END: LeftSidebar -->
+<!-- BEGIN: MainContentArea -->
+<main class="flex-1 flex flex-col gap-5 overflow-hidden" data-purpose="main-dashboard-body">
+<!-- BEGIN: TopBar -->
+<header class="flex items-center justify-between gap-4" data-purpose="top-navigation-bar">
+<!-- Search Input -->
+<div class="relative flex-1 max-w-md">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" viewbox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
+</div>
+<input class="liquid-glass-pill w-full pl-11 pr-12 py-2.5 rounded-full text-xs md:text-sm text-slate-900 placeholder-slate-500 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition" placeholder="Search..." type="text"/>
+<div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none">
+<kbd class="px-2 py-0.5 text-[10px] font-bold text-slate-700 bg-white/70 rounded-full border border-white/80 shadow-xs backdrop-blur-md">âŒ˜K</kbd>
+</div>
+</div>
+<!-- Controls: Date Range Selector & Export -->
+<div class="flex items-center gap-3">
+<!-- Date Filter Button -->
+<div class="liquid-glass-pill rounded-full px-4 py-2.5 flex items-center gap-2.5 text-xs font-bold text-slate-800 cursor-pointer transition active:scale-95">
+<svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><rect height="18" rx="2" ry="2" width="18" x="3" y="4"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>
+<span>May 1 - May 31</span>
+<svg class="w-3.5 h-3.5 text-slate-500 ml-0.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+</div>
+<!-- Export CTA -->
+<button class="bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs rounded-full px-5 py-2.5 flex items-center gap-2 shadow-lg shadow-indigo-600/30 border border-white/40 transition-all duration-300 transform active:scale-95">
+<svg class="w-4 h-4 drop-shadow-sm" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+<span class="drop-shadow-sm">Export</span>
+</button>
+</div>
+</header>
+<!-- END: TopBar -->
+<!-- BEGIN: KpiRow -->
+<section class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4" data-purpose="kpi-metrics-row">
+<!-- KPI 1: Total Revenue -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">Total Revenue</span>
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-800 border border-emerald-300/60 shadow-xs backdrop-blur-md">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live
+              </span>
+</div>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">$248,420</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†‘ 18.6%</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Particle wave visual -->
+<div class="mt-3 h-14 w-full relative">
+<svg class="w-full h-full overflow-visible drop-shadow-md" preserveaspectratio="none" viewbox="0 0 180 50">
+<defs>
+<lineargradient id="revGrad" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#818cf8"></stop>
+<stop offset="50%" stop-color="#38bdf8"></stop>
+<stop offset="100%" stop-color="#06b6d4"></stop>
+</lineargradient>
+</defs>
+<!-- Dotted dynamic wave simulation -->
+<path d="M 0,35 Q 25,10 50,28 T 100,20 T 140,32 T 180,15" fill="none" stroke="url(#revGrad)" stroke-dasharray="3,3" stroke-width="2.5"></path>
+<path d="M 0,42 Q 30,25 60,35 T 115,15 T 150,28 T 180,22" fill="none" opacity="0.6" stroke="url(#revGrad)" stroke-dasharray="2,3" stroke-width="1.8"></path>
+<path d="M 0,25 Q 35,40 75,20 T 130,35 T 160,18 T 180,30" fill="none" opacity="0.4" stroke="url(#revGrad)" stroke-dasharray="1.5,3.5" stroke-width="1.2"></path>
+</svg>
+</div>
+</div>
+<!-- KPI 2: Active Accounts -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">Active Accounts</span>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">1,842</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†‘ 8.4%</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Matrix dot grid pattern -->
+<div class="mt-3 h-14 flex items-center justify-center">
+<svg class="w-full h-10 drop-shadow-sm" viewbox="0 0 160 40">
+<g fill="#6366f1" opacity="0.85">
+<circle cx="10" cy="8" r="2.2"></circle><circle cx="25" cy="8" r="2.2"></circle><circle cx="40" cy="8" r="2.2"></circle><circle cx="55" cy="8" r="2.2"></circle><circle cx="70" cy="8" r="2.2"></circle><circle cx="85" cy="8" r="2.2"></circle><circle cx="100" cy="8" r="2.2"></circle><circle cx="115" cy="8" r="2.2"></circle><circle cx="130" cy="8" r="2.2"></circle><circle cx="145" cy="8" r="2.2"></circle>
+<circle cx="10" cy="18" r="2.2"></circle><circle cx="25" cy="18" r="2.2"></circle><circle cx="40" cy="18" r="2.2"></circle><circle cx="55" cy="18" r="2.2"></circle><circle cx="70" cy="18" r="2.2"></circle><circle cx="85" cy="18" r="2.2"></circle><circle cx="100" cy="18" r="2.2"></circle><circle cx="115" cy="18" r="2.2"></circle><circle cx="130" cy="18" r="2.2"></circle><circle cx="145" cy="18" r="2.2"></circle>
+<circle cx="10" cy="28" r="2.2"></circle><circle cx="25" cy="28" r="2.2"></circle><circle cx="40" cy="28" r="2.2"></circle><circle cx="55" cy="28" r="2.2"></circle><circle cx="70" cy="28" r="2.2"></circle><circle cx="85" cy="28" r="2.2"></circle><circle cx="100" cy="28" r="2.2"></circle><circle cx="115" cy="28" r="2.2"></circle><circle cx="130" cy="28" r="2.2"></circle><circle cx="145" cy="28" r="2.2"></circle>
+</g>
+</svg>
+</div>
+</div>
+<!-- KPI 3: MRR -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">MRR</span>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">$192,540</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†‘ 14.2%</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Mint soft area wave -->
+<div class="mt-3 h-14 -mx-4 -mb-4 overflow-hidden">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 160 50">
+<defs>
+<lineargradient id="mrrGrad" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#10b981" stop-opacity="0.55"></stop>
+<stop offset="100%" stop-color="#34d399" stop-opacity="0.05"></stop>
+</lineargradient>
+</defs>
+<path d="M 0,45 Q 40,40 70,22 T 120,28 T 160,10 L 160,50 L 0,50 Z" fill="url(#mrrGrad)"></path>
+<path d="M 0,45 Q 40,40 70,22 T 120,28 T 160,10" fill="none" stroke="#059669" stroke-linecap="round" stroke-width="2.5"></path>
+</svg>
+</div>
+</div>
+<!-- KPI 4: Conversion Rate -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">Conversion Rate</span>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">2.74%</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†‘ 0.6%</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Line chart with datapoint nodes -->
+<div class="mt-3 h-14 w-full flex items-center">
+<svg class="w-full h-10 overflow-visible drop-shadow-sm" viewbox="0 0 160 40">
+<path d="M 5,30 L 35,22 L 65,28 L 95,15 L 125,18 L 155,8" fill="none" stroke="#0284c7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"></path>
+<circle cx="5" cy="30" fill="#38bdf8" r="3.2" stroke="#fff" stroke-width="1.8"></circle>
+<circle cx="35" cy="22" fill="#38bdf8" r="3.2" stroke="#fff" stroke-width="1.8"></circle>
+<circle cx="65" cy="28" fill="#38bdf8" r="3.2" stroke="#fff" stroke-width="1.8"></circle>
+<circle cx="95" cy="15" fill="#38bdf8" r="3.2" stroke="#fff" stroke-width="1.8"></circle>
+<circle cx="125" cy="18" fill="#38bdf8" r="3.2" stroke="#fff" stroke-width="1.8"></circle>
+<circle cx="155" cy="8" fill="#0284c7" r="4" stroke="#fff" stroke-width="2"></circle>
+</svg>
+</div>
+</div>
+<!-- KPI 5: Churn Rate -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">Churn Rate</span>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">1.28%</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†“ 0.3%</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Vertical bar sequence -->
+<div class="mt-3 h-14 flex items-end justify-between px-2 gap-1.5">
+<div class="w-2.5 h-11 bg-teal-400/80 rounded-full shadow-xs"></div>
+<div class="w-2.5 h-8 bg-teal-400/70 rounded-full shadow-xs"></div>
+<div class="w-2.5 h-10 bg-teal-400/90 rounded-full shadow-xs"></div>
+<div class="w-2.5 h-6 bg-teal-500 rounded-full shadow-xs"></div>
+<div class="w-2.5 h-9 bg-teal-400/70 rounded-full shadow-xs"></div>
+<div class="w-2.5 h-5 bg-teal-600 rounded-full shadow-sm"></div>
+</div>
+</div>
+<!-- KPI 6: NPS Score -->
+<div class="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1">
+<div>
+<span class="text-xs font-bold text-slate-700 frosted-text-depth">NPS Score</span>
+<div class="text-2xl font-black text-slate-900 mt-2 tracking-tight drop-shadow-xs">64</div>
+<div class="text-[11px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
+<span>â†‘ 5</span>
+<span class="text-slate-600 font-medium">vs Apr 1- Apr 30</span>
+</div>
+</div>
+<!-- Semi-circle Speedometer Gauge -->
+<div class="mt-1 h-16 flex items-center justify-center relative">
+<svg class="w-28 h-20 drop-shadow-sm" viewbox="0 0 120 70">
+<!-- Background Arc -->
+<path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="rgba(255,255,255,0.7)" stroke-linecap="round" stroke-width="10"></path>
+<!-- Colored Segments Arc -->
+<path d="M 15 60 A 45 45 0 0 1 45 22" fill="none" stroke="#f87171" stroke-linecap="round" stroke-width="10"></path>
+<path d="M 45 22 A 45 45 0 0 1 75 22" fill="none" stroke="#34d399" stroke-width="10"></path>
+<path d="M 75 22 A 45 45 0 0 1 105 60" fill="none" stroke="#6366f1" stroke-linecap="round" stroke-width="10"></path>
+<!-- Gauge Needle positioned around 64% -->
+<line stroke="#0f172a" stroke-linecap="round" stroke-width="3" x1="60" x2="82" y1="60" y2="35"></line>
+<circle cx="60" cy="60" fill="#0f172a" r="5"></circle>
+</svg>
+</div>
+</div>
+</section>
+<!-- END: KpiRow -->
+<!-- BEGIN: DeepDiveRow -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-5" data-purpose="deep-dive-analytics-section">
+<!-- Deep Dive 1: Revenue by Product (4 Cols) -->
+<div class="liquid-glass rounded-[28px] p-6 lg:col-span-4 flex flex-col justify-between" data-purpose="revenue-by-product-card">
+<div class="flex items-center justify-between">
+<h3 class="font-extrabold text-slate-900 text-sm frosted-text-depth">Revenue by Product</h3>
+<button class="liquid-glass-pill px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-bold text-slate-700 transition active:scale-95">
+<span>This Month</span>
+<svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+</button>
+</div>
+<div class="my-5 flex flex-col sm:flex-row items-center justify-between gap-6">
+<!-- Donut SVG Visualization with centered stats -->
+<div class="relative w-44 h-44 shrink-0 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90 transform drop-shadow-md" viewbox="0 0 160 160">
+<circle cx="80" cy="80" fill="none" r="62" stroke="rgba(255,255,255,0.4)" stroke-width="24"></circle>
+<!-- Pro Plan: 39.6% -->
+<circle cx="80" cy="80" fill="none" r="62" stroke="#4f46e5" stroke-dasharray="154 390" stroke-dashoffset="0" stroke-width="24"></circle>
+<!-- Business Plan: 29.2% -->
+<circle cx="80" cy="80" fill="none" r="62" stroke="#06b6d4" stroke-dasharray="113 390" stroke-dashoffset="-154" stroke-width="24"></circle>
+<!-- Enterprise Plan: 22.2% -->
+<circle cx="80" cy="80" fill="none" r="62" stroke="#818cf8" stroke-dasharray="86 390" stroke-dashoffset="-267" stroke-width="24"></circle>
+<!-- Add-ons: 9.0% -->
+<circle cx="80" cy="80" fill="none" r="62" stroke="#10b981" stroke-dasharray="35 390" stroke-dashoffset="-353" stroke-width="24"></circle>
+</svg>
+<!-- Center Text inside Donut with frosted badge effect -->
+<div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+<span class="text-base font-black text-slate-900 tracking-tight frosted-text-depth">$248,420</span>
+<span class="text-[10px] text-slate-600 font-bold uppercase tracking-wider">Total Revenue</span>
+</div>
+</div>
+<!-- Legend and Breakdown -->
+<div class="flex-1 w-full space-y-2.5">
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-white/80 shadow-xs"></span>
+<span class="font-bold text-slate-800">Pro Plan</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-extrabold text-slate-900">$98,420</span>
+<span class="text-slate-600 font-semibold text-[11px] w-8 text-right">39.6%</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-cyan-500 ring-2 ring-white/80 shadow-xs"></span>
+<span class="font-bold text-slate-800">Business Plan</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-extrabold text-slate-900">$72,430</span>
+<span class="text-slate-600 font-semibold text-[11px] w-8 text-right">29.2%</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-indigo-400 ring-2 ring-white/80 shadow-xs"></span>
+<span class="font-bold text-slate-800">Enterprise Plan</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-extrabold text-slate-900">$55,210</span>
+<span class="text-slate-600 font-semibold text-[11px] w-8 text-right">22.2%</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white/80 shadow-xs"></span>
+<span class="font-bold text-slate-800">Add-ons</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-extrabold text-slate-900">$22,360</span>
+<span class="text-slate-600 font-semibold text-[11px] w-8 text-right">9.0%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Deep Dive 2: User Acquisition Funnel (5 Cols) -->
+<div class="liquid-glass rounded-[28px] p-6 lg:col-span-5 flex flex-col justify-between" data-purpose="user-acquisition-funnel-card">
+<h3 class="font-extrabold text-slate-900 text-sm frosted-text-depth">User Acquisition</h3>
+<!-- Funnel Metrics 4 stages -->
+<div class="grid grid-cols-4 gap-2 mt-4 text-left">
+<div>
+<span class="text-[11px] font-bold text-slate-600">1. Visitors</span>
+<p class="text-base font-black text-slate-900 mt-1 frosted-text-depth">45,639</p>
+<p class="text-[11px] text-slate-500 font-bold mt-0.5">100%</p>
+</div>
+<div>
+<span class="text-[11px] font-bold text-slate-600">2. Signups</span>
+<p class="text-base font-black text-slate-900 mt-1 frosted-text-depth">9,482</p>
+<p class="text-[11px] text-slate-500 font-bold mt-0.5">20.7%</p>
+</div>
+<div>
+<span class="text-[11px] font-bold text-slate-600">3. Activated</span>
+<p class="text-base font-black text-slate-900 mt-1 frosted-text-depth">4,126</p>
+<p class="text-[11px] text-slate-500 font-bold mt-0.5">43.5%</p>
+</div>
+<div>
+<span class="text-[11px] font-bold text-slate-600">4. Paying</span>
+<p class="text-base font-black text-slate-900 mt-1 frosted-text-depth">1,842</p>
+<p class="text-[11px] text-slate-500 font-bold mt-0.5">44.6%</p>
+</div>
+</div>
+<!-- Stylized Funnel Stream SVG Graphic -->
+<div class="my-3 h-20 w-full relative">
+<svg class="w-full h-full overflow-visible drop-shadow-md" preserveaspectratio="none" viewbox="0 0 450 70">
+<defs>
+<lineargradient id="funnelStream" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#818cf8" stop-opacity="0.95"></stop>
+<stop offset="35%" stop-color="#38bdf8" stop-opacity="0.9"></stop>
+<stop offset="70%" stop-color="#06b6d4" stop-opacity="0.95"></stop>
+<stop offset="100%" stop-color="#4f46e5" stop-opacity="1"></stop>
+</lineargradient>
+</defs>
+<!-- Funnel tapering flow -->
+<path d="M 0,2 C 100,5 150,22 230,26 C 320,30 380,32 450,33 L 450,38 C 380,38 320,41 230,46 C 150,50 100,65 0,68 Z" fill="url(#funnelStream)"></path>
+</svg>
+</div>
+<!-- Overall Conversion Bottom Bar -->
+<div class="liquid-glass-subtle rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs">
+<span class="font-bold text-slate-800 frosted-text-depth">Overall Conversion Rate</span>
+<span class="font-black text-emerald-800 bg-emerald-400/25 px-3 py-1 rounded-full border border-emerald-300/60 shadow-xs backdrop-blur-md">4.0%</span>
+</div>
+</div>
+<!-- Deep Dive 3: Account Health Spider / Radar (3 Cols) -->
+<div class="liquid-glass rounded-[28px] p-6 lg:col-span-3 flex flex-col justify-between" data-purpose="account-health-radar-card">
+<div class="flex items-center justify-between">
+<h3 class="font-extrabold text-slate-900 text-sm frosted-text-depth">Account Health</h3>
+</div>
+<div class="my-2 flex items-center justify-between gap-4">
+<!-- Radar / Hexagon Graphic with Center Metric -->
+<div class="relative w-36 h-36 flex items-center justify-center">
+<svg class="w-full h-full drop-shadow-sm" viewbox="0 0 140 140">
+<!-- Background Radar Polygons -->
+<polygon fill="none" points="70,10 120,40 120,100 70,130 20,100 20,40" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"></polygon>
+<polygon fill="none" points="70,25 105,48 105,92 70,115 35,92 35,48" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"></polygon>
+<!-- Radar Colored Polygon for Current Health -->
+<polygon fill="rgba(99, 102, 241, 0.45)" points="70,14 116,42 110,95 70,124 25,95 24,42" stroke="#4f46e5" stroke-width="2.2"></polygon>
+<!-- Category node labels styled as liquid pills -->
+<rect fill="#4f46e5" height="14" rx="7" width="40" x="50" y="3"></rect>
+<text fill="#fff" font-size="7.5" font-weight="800" text-anchor="middle" x="70" y="13">Adoption 92</text>
+<rect fill="#0284c7" height="14" rx="7" width="46" x="93" y="37"></rect>
+<text fill="#fff" font-size="7.5" font-weight="800" text-anchor="middle" x="116" y="47">Engage 88</text>
+<rect fill="#059669" height="14" rx="7" width="46" x="87" y="92"></rect>
+<text fill="#fff" font-size="7.5" font-weight="800" text-anchor="middle" x="110" y="102">Retent 85</text>
+<rect fill="#0d9488" height="14" rx="7" width="46" x="7" y="92"></rect>
+<text fill="#fff" font-size="7.5" font-weight="800" text-anchor="middle" x="30" y="102">Support 90</text>
+<rect fill="#7c3aed" height="14" rx="7" width="46" x="5" y="37"></rect>
+<text fill="#fff" font-size="7.5" font-weight="800" text-anchor="middle" x="28" y="47">Security 90</text>
+</svg>
+<!-- Center Score Overlay -->
+<div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+<span class="text-xl font-black text-slate-900 leading-none frosted-text-depth">89</span>
+<span class="text-[9px] text-slate-700 font-extrabold mt-0.5 text-center leading-tight">Overall<br/>Health</span>
+</div>
+</div>
+<!-- Health Item List Breakdown -->
+<div class="space-y-1.5 text-xs">
+<div class="flex items-center justify-between gap-3">
+<span class="flex items-center gap-1.5 font-bold text-slate-700">
+<span class="w-2 h-2 rounded-full bg-indigo-600 ring-1 ring-white"></span> Adoption
+                </span>
+<span class="font-black text-slate-900">92</span>
+</div>
+<div class="flex items-center justify-between gap-3">
+<span class="flex items-center gap-1.5 font-bold text-slate-700">
+<span class="w-2 h-2 rounded-full bg-cyan-500 ring-1 ring-white"></span> Engagement
+                </span>
+<span class="font-black text-slate-900">88</span>
+</div>
+<div class="flex items-center justify-between gap-3">
+<span class="flex items-center gap-1.5 font-bold text-slate-700">
+<span class="w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white"></span> Retention
+                </span>
+<span class="font-black text-slate-900">85</span>
+</div>
+<div class="flex items-center justify-between gap-3">
+<span class="flex items-center gap-1.5 font-bold text-slate-700">
+<span class="w-2 h-2 rounded-full bg-teal-500 ring-1 ring-white"></span> Support
+                </span>
+<span class="font-black text-slate-900">90</span>
+</div>
+<div class="flex items-center justify-between gap-3">
+<span class="flex items-center gap-1.5 font-bold text-slate-700">
+<span class="w-2 h-2 rounded-full bg-purple-600 ring-1 ring-white"></span> Security
+                </span>
+<span class="font-black text-slate-900">90</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: DeepDiveRow -->
+<!-- BEGIN: MidIntelligenceRow -->
+<section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4" data-purpose="intelligence-and-channels-row">
+<!-- Card 1: Top Acquisition Channels -->
+<div class="liquid-glass rounded-[26px] p-5 flex flex-col justify-between" data-purpose="acquisition-channels-card">
+<div class="flex items-center justify-between mb-2">
+<h4 class="font-extrabold text-slate-900 text-sm frosted-text-depth">Top Acquisition Channels</h4>
+<span class="text-[11px] font-bold text-slate-600 bg-white/40 px-2 py-0.5 rounded-full border border-white/60">This Month â–¾</span>
+</div>
+<div class="space-y-2 mt-2">
+<div>
+<div class="flex justify-between text-xs font-bold mb-1">
+<span class="text-slate-700">Organic Search</span>
+<span class="text-slate-900 font-extrabold">12,500</span>
+</div>
+<div class="w-full bg-white/40 rounded-full h-2 overflow-hidden border border-white/50">
+<div class="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full shadow-xs" style="width: 100%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-xs font-bold mb-1">
+<span class="text-slate-700">Paid Search</span>
+<span class="text-slate-900 font-extrabold">8,430</span>
+</div>
+<div class="w-full bg-white/40 rounded-full h-2 overflow-hidden border border-white/50">
+<div class="bg-gradient-to-r from-indigo-400 to-indigo-500 h-2 rounded-full shadow-xs" style="width: 67%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-xs font-bold mb-1">
+<span class="text-slate-700">Direct</span>
+<span class="text-slate-900 font-extrabold">6,120</span>
+</div>
+<div class="w-full bg-white/40 rounded-full h-2 overflow-hidden border border-white/50">
+<div class="bg-gradient-to-r from-sky-400 to-indigo-400 h-2 rounded-full shadow-xs" style="width: 49%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-xs font-bold mb-1">
+<span class="text-slate-700">Referral</span>
+<span class="text-slate-900 font-extrabold">4,320</span>
+</div>
+<div class="w-full bg-white/40 rounded-full h-2 overflow-hidden border border-white/50">
+<div class="bg-gradient-to-r from-cyan-400 to-sky-400 h-2 rounded-full shadow-xs" style="width: 34%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-xs font-bold mb-1">
+<span class="text-slate-700">Social Media</span>
+<span class="text-slate-900 font-extrabold">3,210</span>
+</div>
+<div class="w-full bg-white/40 rounded-full h-2 overflow-hidden border border-white/50">
+<div class="bg-gradient-to-r from-teal-400 to-cyan-400 h-2 rounded-full shadow-xs" style="width: 25%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 2: Events Breakdown (Bubbles) -->
+<div class="liquid-glass rounded-[26px] p-5 flex flex-col justify-between" data-purpose="events-breakdown-card">
+<h4 class="font-extrabold text-slate-900 text-sm frosted-text-depth">Events Breakdown</h4>
+<!-- Interactive Pastel Circles Pack with Liquid Glass Sheen -->
+<div class="relative h-44 w-full flex items-center justify-center">
+<!-- Large Bubble 40% Feature Used -->
+<div class="absolute left-2 top-3 w-28 h-28 rounded-full bg-gradient-to-br from-indigo-500/90 to-indigo-700/90 backdrop-blur-xl text-white flex flex-col items-center justify-center p-2 shadow-xl shadow-indigo-500/30 border border-white/50 transform hover:scale-105 transition-all duration-300 cursor-default active:scale-95">
+<span class="text-xl font-black drop-shadow-sm">40%</span>
+<span class="text-[10px] text-indigo-100 font-bold text-center leading-tight">Feature Used</span>
+</div>
+<!-- Medium Bubble 28% Workspace Created -->
+<div class="absolute right-4 top-2 w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400/90 to-teal-500/90 backdrop-blur-xl text-white flex flex-col items-center justify-center p-2 shadow-xl shadow-emerald-500/25 border border-white/50 transform hover:scale-105 transition-all duration-300 cursor-default active:scale-95">
+<span class="text-lg font-black drop-shadow-sm">28%</span>
+<span class="text-[9px] text-emerald-50 font-bold text-center leading-tight">Workspace<br/>Created</span>
+</div>
+<!-- Bubble 18% Invites Sent -->
+<div class="absolute bottom-2 left-20 w-20 h-20 rounded-full bg-gradient-to-br from-sky-400/90 to-cyan-500/90 backdrop-blur-xl text-white flex flex-col items-center justify-center p-1.5 shadow-lg shadow-sky-400/25 border border-white/50 transform hover:scale-105 transition-all duration-300 cursor-default active:scale-95">
+<span class="text-base font-black drop-shadow-sm">18%</span>
+<span class="text-[9px] text-sky-100 font-bold text-center leading-tight">Invites Sent</span>
+</div>
+<!-- Bubble 14% Other -->
+<div class="absolute bottom-3 right-6 w-16 h-16 rounded-full bg-gradient-to-br from-purple-400/90 to-pink-500/90 backdrop-blur-xl text-white flex flex-col items-center justify-center p-1 shadow-md shadow-purple-500/20 border border-white/50 transform hover:scale-105 transition-all duration-300 cursor-default active:scale-95">
+<span class="text-sm font-black drop-shadow-sm">14%</span>
+<span class="text-[8.5px] text-purple-100 font-bold">Other</span>
+</div>
+</div>
+</div>
+<!-- Card 3: Recent Account Activity Feed -->
+<div class="liquid-glass rounded-[26px] p-5 flex flex-col justify-between" data-purpose="recent-activity-card">
+<div class="flex items-center justify-between mb-3">
+<h4 class="font-extrabold text-slate-900 text-sm frosted-text-depth">Recent Account Activity</h4>
+<a class="text-xs font-bold text-indigo-700 hover:text-indigo-900 transition" href="#">View all</a>
+</div>
+<div class="space-y-3">
+<div class="flex items-start justify-between text-xs pb-2 border-b border-white/50">
+<div class="pr-2">
+<span class="font-black text-slate-900">COOL Corp.</span>
+<span class="text-slate-700 font-medium"> upgraded to Enterprise Plan</span>
+</div>
+<span class="text-[11px] text-slate-500 shrink-0 font-bold">2m ago</span>
+</div>
+<div class="flex items-start justify-between text-xs pb-2 border-b border-white/50">
+<div class="pr-2">
+<span class="font-black text-slate-900">CHEAKY Industries.</span>
+<span class="text-slate-700 font-medium"> invited 5 new users</span>
+</div>
+<span class="text-[11px] text-slate-500 shrink-0 font-bold">15m ago</span>
+</div>
+<div class="flex items-start justify-between text-xs pb-2 border-b border-white/50">
+<div class="pr-2">
+<span class="font-black text-slate-900">SNEAKY Enterprises</span>
+<span class="text-slate-700 font-medium"> activated 2 new integrations</span>
+</div>
+<span class="text-[11px] text-slate-500 shrink-0 font-bold">1h ago</span>
+</div>
+<div class="flex items-start justify-between text-xs">
+<div class="pr-2">
+<span class="font-black text-slate-900">SUSPICIOUS LLC</span>
+<span class="text-slate-700 font-medium"> reached 90% usage</span>
+</div>
+<span class="text-[11px] text-slate-500 shrink-0 font-bold">3h ago</span>
+</div>
+</div>
+</div>
+<!-- Card 4: AI Insight Card -->
+<div class="liquid-glass rounded-[26px] p-5 flex flex-col justify-between relative overflow-hidden group" data-purpose="ai-insight-banner">
+<div>
+<div class="flex items-center gap-1.5 text-xs font-black text-indigo-800 bg-white/70 px-3 py-1 rounded-full w-fit border border-white/80 shadow-xs backdrop-blur-md">
+<svg class="w-3.5 h-3.5 text-indigo-600" fill="currentColor" viewbox="0 0 24 24">
+<path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"></path>
+</svg>
+<span>AI Insight</span>
+</div>
+<p class="text-sm font-bold text-slate-900 mt-4 leading-snug frosted-text-depth">
+              Businesses using <span class="text-indigo-700 font-black">Advanced Automation</span> see 36% higher retention rates
+            </p>
+</div>
+<div class="mt-4 flex items-end justify-between">
+<a class="text-xs font-black text-indigo-700 hover:text-indigo-900 flex items-center gap-1 group-hover:translate-x-1.5 transition-transform" href="#">
+<span>View full insight</span>
+<span>â†’</span>
+</a>
+<!-- 3D Torus Graphic Icon representation -->
+<div class="w-20 h-20 -mr-2 -mb-2 relative pointer-events-none">
+<svg class="w-full h-full transform rotate-12 drop-shadow-xl" viewbox="0 0 100 100">
+<defs>
+<lineargradient id="torusGrad" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#c084fc"></stop>
+<stop offset="50%" stop-color="#818cf8"></stop>
+<stop offset="100%" stop-color="#06b6d4"></stop>
+</lineargradient>
+</defs>
+<ellipse cx="50" cy="50" fill="none" rx="36" ry="24" stroke="url(#torusGrad)" stroke-linecap="round" stroke-width="14"></ellipse>
+</svg>
+</div>
+</div>
+</div>
+</section>
+<!-- END: MidIntelligenceRow -->
+<!-- BEGIN: AccountsAtRiskTable -->
+<section class="liquid-glass rounded-[28px] p-6" data-purpose="accounts-at-risk-table-card">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-extrabold text-slate-900 text-sm tracking-tight frosted-text-depth">Accounts at Risk</h3>
+<a class="text-xs font-bold text-indigo-700 hover:text-indigo-900 transition" href="#">View all</a>
+</div>
+<!-- Table Container -->
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse" id="accounts-risk-table">
+<thead>
+<tr class="text-[11px] font-black uppercase tracking-wider text-slate-700 border-b border-white/60">
+<th class="pb-3 px-2 font-bold">Account</th>
+<th class="pb-3 px-2 font-bold text-center">Health Score</th>
+<th class="pb-3 px-2 font-bold text-center">Trend</th>
+<th class="pb-3 px-2 font-bold">Last Active</th>
+<th class="pb-3 px-2 font-bold">Usage</th>
+<th class="pb-3 px-2 font-bold">MMR</th>
+<th class="pb-3 px-2 font-bold">Risk Factor</th>
+</tr>
+</thead>
+<tbody class="text-xs divide-y divide-white/40 font-semibold">
+<!-- Row 1: COOL Corp. -->
+<tr class="hover:bg-white/40 transition duration-150">
+<td class="py-3.5 px-2 font-extrabold text-slate-900">COOL Corp.</td>
+<td class="py-3.5 px-2 text-center">
+<span class="inline-block px-3 py-0.5 rounded-full font-black text-rose-700 bg-rose-400/25 border border-rose-300/70 text-xs shadow-xs backdrop-blur-md">32</span>
+</td>
+<td class="py-3.5 px-2 text-center">
+<svg class="w-20 h-5 mx-auto drop-shadow-sm" viewbox="0 0 80 20">
+<path d="M 0,10 Q 15,2 30,12 T 60,18 T 80,19" fill="none" stroke="#f43f5e" stroke-linecap="round" stroke-width="2.2"></path>
+</svg>
+</td>
+<td class="py-3.5 px-2 text-slate-700 font-medium">7 days ago</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<div class="w-16 bg-white/40 h-1.5 rounded-full overflow-hidden border border-white/50">
+<div class="bg-cyan-500 h-1.5 rounded-full shadow-xs" style="width: 12%"></div>
+</div>
+<span class="text-[11px] font-bold text-slate-700">12%</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-black text-slate-900">$1,200</td>
+<td class="py-3.5 px-2">
+<span class="text-[11px] font-black text-rose-600 bg-rose-50/70 px-2 py-0.5 rounded-full border border-rose-200">Low Usage</span>
+</td>
+</tr>
+<!-- Row 2: CHEAKY Industries. -->
+<tr class="hover:bg-white/40 transition duration-150">
+<td class="py-3.5 px-2 font-extrabold text-slate-900">CHEAKY Industries.</td>
+<td class="py-3.5 px-2 text-center">
+<span class="inline-block px-3 py-0.5 rounded-full font-black text-orange-700 bg-orange-400/25 border border-orange-300/70 text-xs shadow-xs backdrop-blur-md">48</span>
+</td>
+<td class="py-3.5 px-2 text-center">
+<svg class="w-20 h-5 mx-auto drop-shadow-sm" viewbox="0 0 80 20">
+<path d="M 0,6 Q 20,18 40,8 T 65,16 T 80,18" fill="none" stroke="#f97316" stroke-linecap="round" stroke-width="2.2"></path>
+</svg>
+</td>
+<td class="py-3.5 px-2 text-slate-700 font-medium">5 days ago</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<div class="w-16 bg-white/40 h-1.5 rounded-full overflow-hidden border border-white/50">
+<div class="bg-cyan-500 h-1.5 rounded-full shadow-xs" style="width: 25%"></div>
+</div>
+<span class="text-[11px] font-bold text-slate-700">25%</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-black text-slate-900">$2,400</td>
+<td class="py-3.5 px-2">
+<span class="text-[11px] font-black text-rose-600 bg-rose-50/70 px-2 py-0.5 rounded-full border border-rose-200">Low Engagement</span>
+</td>
+</tr>
+<!-- Row 3: SNEAKY Enterprises -->
+<tr class="hover:bg-white/40 transition duration-150">
+<td class="py-3.5 px-2 font-extrabold text-slate-900">SNEAKY Enterprises</td>
+<td class="py-3.5 px-2 text-center">
+<span class="inline-block px-3 py-0.5 rounded-full font-black text-amber-700 bg-amber-400/25 border border-amber-300/70 text-xs shadow-xs backdrop-blur-md">61</span>
+</td>
+<td class="py-3.5 px-2 text-center">
+<svg class="w-20 h-5 mx-auto drop-shadow-sm" viewbox="0 0 80 20">
+<path d="M 0,14 Q 20,4 40,14 T 60,10 T 80,12" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-width="2.2"></path>
+</svg>
+</td>
+<td class="py-3.5 px-2 text-slate-700 font-medium">3 days ago</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<div class="w-16 bg-white/40 h-1.5 rounded-full overflow-hidden border border-white/50">
+<div class="bg-cyan-500 h-1.5 rounded-full shadow-xs" style="width: 40%"></div>
+</div>
+<span class="text-[11px] font-bold text-slate-700">40%</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-black text-slate-900">$3,600</td>
+<td class="py-3.5 px-2">
+<span class="text-[11px] font-black text-amber-700 bg-amber-50/70 px-2 py-0.5 rounded-full border border-amber-200">Feature Underused</span>
+</td>
+</tr>
+<!-- Row 4: SUSPICIOUS LLC -->
+<tr class="hover:bg-white/40 transition duration-150">
+<td class="py-3.5 px-2 font-extrabold text-slate-900">SUSPICIOUS LLC</td>
+<td class="py-3.5 px-2 text-center">
+<span class="inline-block px-3 py-0.5 rounded-full font-black text-amber-700 bg-amber-400/25 border border-amber-300/70 text-xs shadow-xs backdrop-blur-md">61</span>
+</td>
+<td class="py-3.5 px-2 text-center">
+<svg class="w-20 h-5 mx-auto drop-shadow-sm" viewbox="0 0 80 20">
+<path d="M 0,16 Q 20,8 40,16 T 60,12 T 80,14" fill="none" stroke="#10b981" stroke-linecap="round" stroke-width="2.2"></path>
+</svg>
+</td>
+<td class="py-3.5 px-2 text-slate-700 font-medium">1 days ago</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<div class="w-16 bg-white/40 h-1.5 rounded-full overflow-hidden border border-white/50">
+<div class="bg-cyan-500 h-1.5 rounded-full shadow-xs" style="width: 65%"></div>
+</div>
+<span class="text-[11px] font-bold text-slate-700">65%</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-black text-slate-900">$4,800</td>
+<td class="py-3.5 px-2">
+<span class="text-[11px] font-black text-emerald-700 bg-emerald-50/70 px-2 py-0.5 rounded-full border border-emerald-200">Billing Issue</span>
+</td>
+</tr>
+<!-- Row 5: CURRIOUS Corp -->
+<tr class="hover:bg-white/40 transition duration-150">
+<td class="py-3.5 px-2 font-extrabold text-slate-900">CURRIOUS Corp</td>
+<td class="py-3.5 px-2 text-center">
+<span class="inline-block px-3 py-0.5 rounded-full font-black text-emerald-800 bg-emerald-400/25 border border-emerald-300/70 text-xs shadow-xs backdrop-blur-md">86</span>
+</td>
+<td class="py-3.5 px-2 text-center">
+<svg class="w-20 h-5 mx-auto drop-shadow-sm" viewbox="0 0 80 20">
+<path d="M 0,16 Q 20,4 40,14 T 60,6 T 80,4" fill="none" stroke="#10b981" stroke-linecap="round" stroke-width="2.2"></path>
+</svg>
+</td>
+<td class="py-3.5 px-2 text-slate-700 font-medium">Just now</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<div class="w-16 bg-white/40 h-1.5 rounded-full overflow-hidden border border-white/50">
+<div class="bg-cyan-500 h-1.5 rounded-full shadow-xs" style="width: 80%"></div>
+</div>
+<span class="text-[11px] font-bold text-slate-700">80%</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-black text-slate-900">$6,000</td>
+<td class="py-3.5 px-2">
+<span class="text-[11px] font-bold text-slate-500">None</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- END: AccountsAtRiskTable -->
+</main>
+<!-- END: MainContentArea -->
+</div>
+<!-- END: DashboardWrapper -->
+<!-- Dynamic Specular Highlight Interaction Script -->
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const liquidCards = document.querySelectorAll('.liquid-glass');
+    
+    liquidCards.forEach(card => {
+      card.addEventListener('mousemove', (e) => {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        card.style.setProperty('--mouse-x', `${x}px`);
+        card.style.setProperty('--mouse-y', `${y}px`);
+      });
+    });
+  });
+</script>
+</body></html>

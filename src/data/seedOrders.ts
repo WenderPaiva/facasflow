@@ -35,6 +35,13 @@ export function createEnterpriseSeedDatabase(
     orders: [],
     deliveries: [],
     returns: [],
+    stock: [],
+    notas: [],
+    noteSequence: 0,
+    expenses: [],
+    serviceProviders: [],
+    payrollEmployees: [],
+    investments: [],
     employees: [],
   };
 }

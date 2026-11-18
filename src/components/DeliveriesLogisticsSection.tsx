@@ -67,16 +67,16 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
   };
 
   const inputClass =
-    'w-full px-3.5 py-2.5 text-xs rounded-2xl bg-zinc-950 border border-zinc-800 text-slate-100 placeholder-zinc-500 focus:border-rose-700 outline-none transition';
+    'liquid-glass-pill w-full px-3.5 py-2.5 text-xs rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-slate-50 tracking-tight">
-          Seção 4 • Entregas e Logísticas de Saída
+        <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
+          Entregas e Logística de Saída
         </h2>
-        <p className="text-xs text-zinc-400">
-          Protocolo digital de saída: rastreie exatamente quem retirou ou despachou cada ferramenta com data e hora exatas.
+        <p className="text-xs font-medium text-slate-700">
+          Protocolo digital de saída para rastrear quem retirou ou despachou cada ferramenta com data e hora.
         </p>
       </div>
 
@@ -84,26 +84,26 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
         {/* Left Bento Card: Register New Dispatch (5 Cols) */}
         <form
           onSubmit={handleSubmit}
-          className="lg:col-span-5 rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 space-y-4"
+          className="lg:col-span-5 liquid-glass rounded-[28px] p-6 space-y-4"
         >
-          <div className="flex items-center gap-2.5 pb-3 border-b border-zinc-800">
-            <div className="w-9 h-9 rounded-2xl bg-rose-900/50 border border-rose-700/40 flex items-center justify-center text-rose-400">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-white/60">
+            <div className="w-9 h-9 rounded-2xl bg-indigo-500/15 border border-indigo-300/60 flex items-center justify-center text-indigo-700">
               <Truck className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-50">
+              <h3 className="text-sm font-extrabold text-slate-900">
                 Registrar Saída / Retirada de Faca
               </h3>
-              <p className="text-[11px] text-zinc-400">
-                Marca automaticamente a OS como "Faca Pronta"
+              <p className="text-[11px] font-medium text-slate-600">
+                Marca automaticamente a OS como &quot;Faca Pronta&quot;
               </p>
             </div>
           </div>
 
           {/* 1. Selecionar OS / Cliente */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
-              1. Ordem de Serviço (OS & Cliente)
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+              1. Ordem de Serviço
             </label>
             <select
               value={selectedOrderId}
@@ -112,16 +112,16 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
             >
               {orders.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.id} — {o.companyName} ({o.toolDescription})
+                  {o.id} - {o.companyName} - {o.toolDescription}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* 2. Responsável pela Retirada (4 Modalidades) */}
+          {/* 2. Responsável pela Retirada */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
-              2. Modalidade / Responsável pela Retirada
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+              2. Modalidade e Responsável pela Retirada
             </label>
             <div className="grid grid-cols-2 gap-2">
               {(Object.keys(DELIVERY_METHOD_META) as DeliveryMethod[]).map((m) => {
@@ -132,13 +132,13 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                     type="button"
                     key={m}
                     onClick={() => setMethod(m)}
-                    className={`py-2.5 px-3 rounded-2xl text-xs font-semibold border text-left transition cursor-pointer ${
+                    className={`py-2.5 px-3 rounded-2xl text-xs font-bold border text-left transition cursor-pointer ${
                       active
-                        ? 'bg-rose-800 text-white border-rose-600 shadow-sm'
-                        : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-slate-200'
+                        ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-white/40 shadow-md'
+                        : 'liquid-glass-pill text-slate-700'
                     }`}
                   >
-                    [{meta.label}]
+                    {meta.label}
                   </button>
                 );
               })}
@@ -147,15 +147,15 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
 
           {/* 3. Nome do Motorista / Portador */}
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
-              3. Nome do Motorista / Portador / Placa *
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+              3. Nome do Motorista, Portador ou Placa
             </label>
             <input
               type="text"
               required
               value={carrierName}
               onChange={(e) => setCarrierName(e.target.value)}
-              placeholder="Ex: Motoboy Carlos (Placa FKR-4A89) ou Retirado por Marcos"
+              placeholder="Ex: Motoboy Carlos, Placa FKR-4A89 ou Retirado por Marcos"
               className={inputClass}
             />
           </div>
@@ -163,7 +163,7 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
           {/* 4. Data e Hora Exata da Saída */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
                 Data da Saída
               </label>
               <input
@@ -175,7 +175,7 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
                 Hora Exata
               </label>
               <input
@@ -189,21 +189,21 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
-              Observação de Expedição (Opcional)
+            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+              Observação de Expedição
             </label>
             <input
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Ex: Canhoto assinado, entregue c/ proteção de borracha..."
+              placeholder="Ex: Canhoto assinado, entregue com proteção de borracha"
               className={inputClass}
             />
           </div>
 
           <button
             type="submit"
-            className="w-full py-3 rounded-2xl text-xs font-bold bg-gradient-to-r from-rose-800 to-red-900 hover:from-rose-700 hover:to-red-800 text-white shadow-lg shadow-rose-950/60 flex items-center justify-center gap-2 transition cursor-pointer"
+            className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
             <span>Confirmar Registro de Saída</span>
@@ -211,22 +211,24 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
         </form>
 
         {/* Right Bento Card: Delivery History Log (7 Cols) */}
-        <div className="lg:col-span-7 rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+        <div className="lg:col-span-7 liquid-glass rounded-[28px] p-6 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-white/60">
             <div>
-              <h3 className="text-sm font-bold text-slate-50">
-                Histórico de Entregas & Retiradas ({deliveries.length})
+              <h3 className="text-sm font-extrabold text-slate-900">
+                Histórico de Entregas e Retiradas
               </h3>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs font-medium text-slate-600">
                 Rastreabilidade completa contra extravio de ferramentas
               </p>
             </div>
-            <PackageCheck className="w-5 h-5 text-emerald-400" />
+            <span className="px-2.5 py-1 rounded-full bg-white/65 border border-white/80 text-xs font-extrabold text-slate-800">
+              {deliveries.length}
+            </span>
           </div>
 
           <div className="space-y-3">
             {deliveries.length === 0 ? (
-              <div className="p-10 rounded-2xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+              <div className="p-10 rounded-2xl border border-dashed border-white/70 text-center text-xs font-medium text-slate-600">
                 Nenhuma entrega ou retirada registrada ainda.
               </div>
             ) : (
@@ -235,34 +237,34 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                 return (
                   <div
                     key={del.id}
-                    className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="p-4 rounded-2xl liquid-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-lg bg-rose-950/80 border border-rose-800/60 font-mono text-xs font-bold text-rose-300">
+                        <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
                           {del.orderId}
                         </span>
-                        <span className="text-xs font-bold text-slate-100">
+                        <span className="text-xs font-extrabold text-slate-900">
                           {del.companyName}
                         </span>
                         <span
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${meta?.badgeClass}`}
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${meta?.badgeClass}`}
                         >
-                          [{meta?.label}]
+                          {meta?.label}
                         </span>
                       </div>
 
-                      <p className="text-xs text-zinc-300 font-medium">
+                      <p className="text-xs text-slate-800 font-semibold">
                         {del.toolDescription}
                       </p>
 
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400 pt-0.5">
-                        <span className="flex items-center gap-1 text-slate-200 font-semibold">
-                          <UserCheck className="w-3.5 h-3.5 text-rose-400" />
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 pt-0.5">
+                        <span className="flex items-center gap-1 text-slate-900 font-bold">
+                          <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
                           {del.carrierOrPersonName}
                         </span>
                         {del.notes && (
-                          <span className="flex items-center gap-1 text-zinc-500">
+                          <span className="flex items-center gap-1 text-slate-600">
                             <MapPin className="w-3 h-3" />
                             {del.notes}
                           </span>
@@ -271,11 +273,11 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                     </div>
 
                     <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                      <div className="sm:text-right font-mono bg-zinc-900 px-3 py-2 rounded-2xl border border-zinc-800">
-                        <span className="text-[10px] uppercase text-zinc-500 block">
+                      <div className="sm:text-right font-mono bg-white/55 px-3 py-2 rounded-2xl border border-white/75">
+                        <span className="text-[10px] uppercase font-bold text-slate-600 block">
                           Saída Registrada
                         </span>
-                        <span className="text-xs font-bold text-emerald-400 flex items-center sm:justify-end gap-1 mt-0.5">
+                        <span className="text-xs font-extrabold text-emerald-700 flex items-center sm:justify-end gap-1 mt-0.5">
                           <Clock className="w-3 h-3" />
                           {del.dispatchedAt}
                         </span>
@@ -283,7 +285,7 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                       <button
                         type="button"
                         onClick={() => onDeleteDelivery(del.id)}
-                        className="p-2.5 rounded-2xl bg-zinc-900 hover:bg-rose-900/80 text-zinc-500 hover:text-rose-200 border border-zinc-800 hover:border-rose-700 transition cursor-pointer"
+                        className="p-2.5 rounded-2xl bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
                         title="Apagar registro de entrega"
                       >
                         <Trash2 className="w-4 h-4" />

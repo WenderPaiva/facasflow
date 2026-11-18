@@ -1,14 +1,13 @@
 import React from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowUpRight,
   Building2,
   CalendarClock,
-  CheckCircle2,
   FileWarning,
   Kanban,
-  Layers,
-  Plus,
+  Package,
   Truck,
   Wrench,
 } from 'lucide-react';
@@ -17,6 +16,7 @@ import {
   Company,
   DeliveryRecord,
   DieOrder,
+  StockItem,
   WarrantyReturnRecord,
 } from '../types/order';
 import {
@@ -33,6 +33,7 @@ interface BentoOverviewSectionProps {
   orders: DieOrder[];
   deliveries: DeliveryRecord[];
   returns: WarrantyReturnRecord[];
+  stock: StockItem[];
   financials: FinancialBreakdown;
   onNavigate: (section: ActiveSection) => void;
   onOpenNewOrder: () => void;
@@ -44,6 +45,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
   orders,
   deliveries,
   returns,
+  stock,
   financials,
   onNavigate,
   onOpenNewOrder,
@@ -51,151 +53,381 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
 }) => {
   const readyCount = orders.filter((o) => o.stage === 'faca_pronta').length;
   const activeProductionCount = orders.length - readyCount;
+  const openReturnsCount = returns.filter((r) => r.status !== 'liberado').length;
+  const madeirasStock = stock.filter((s) => s.category === 'madeiras');
+  const laminasStock = stock.filter((s) => s.category === 'laminas');
+  const lowMadeiras = madeirasStock.filter((s) => s.quantity <= s.minStock);
+  const lowLaminas = laminasStock.filter((s) => s.quantity <= s.minStock);
 
   return (
     <div className="space-y-5">
-      {/* TOP ROW: ASYMMETRIC BENTO GRID (DASHBOARD V22 STYLE) */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-        {/* BENTO CARD 1: HERO DARK CRIMSON COMMAND CARD (5 Cols) */}
-        <div className="md:col-span-5 rounded-3xl p-6 bg-gradient-to-br from-rose-950/90 via-zinc-900 to-zinc-950 border border-rose-800/50 shadow-xl flex flex-col justify-between relative overflow-hidden">
-          <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full bg-rose-700/15 blur-2xl pointer-events-none" />
+      {/* TOP KPI ROW: 6 LIQUID GLASS CARDS (iOS 26 Style) */}
+      <section
+        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4"
+        data-purpose="kpi-metrics-row"
+      >
+        {/* KPI 1: Volume Total */}
+        <div
+          onClick={() => onNavigate('financeiro')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+                Volume Total
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-800 border border-emerald-300/60 backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live
+              </span>
+            </div>
+            <div className="text-xl font-black text-slate-900 mt-2 tracking-tight">
+              {formatBRL(financials.totalVolume)}
+            </div>
+            <div className="text-[11px] font-bold text-emerald-700 mt-1">
+              {orders.length} OS registradas
+            </div>
+          </div>
+          <div className="mt-3 h-12 w-full relative">
+            <svg
+              className="w-full h-full overflow-visible drop-shadow-md"
+              preserveAspectRatio="none"
+              viewBox="0 0 180 50"
+            >
+              <defs>
+                <linearGradient id="revGrad" x1="0%" x2="100%" y1="0%" y2="0%">
+                  <stop offset="0%" stopColor="#818cf8" />
+                  <stop offset="50%" stopColor="#38bdf8" />
+                  <stop offset="100%" stopColor="#06b6d4" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M 0,35 Q 25,10 50,28 T 100,20 T 140,32 T 180,15"
+                fill="none"
+                stroke="url(#revGrad)"
+                strokeDasharray="3,3"
+                strokeWidth="2.5"
+              />
+              <path
+                d="M 0,42 Q 30,25 60,35 T 115,15 T 150,28 T 180,22"
+                fill="none"
+                opacity="0.6"
+                stroke="url(#revGrad)"
+                strokeDasharray="2,3"
+                strokeWidth="1.8"
+              />
+            </svg>
+          </div>
+        </div>
 
+        {/* KPI 2: A Receber 30/60d */}
+        <div
+          onClick={() => onNavigate('financeiro')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+              A Receber 30/60d
+            </span>
+            <div className="text-xl font-black text-slate-900 mt-2 tracking-tight">
+              {formatBRL(financials.receivable30d)}
+            </div>
+            <div className="text-[11px] font-bold text-emerald-700 mt-1">
+              {financials.receivableCount} título(s) ativos
+            </div>
+          </div>
+          <div className="mt-3 h-12 -mx-4 -mb-4 overflow-hidden">
+            <svg
+              className="w-full h-full"
+              preserveAspectRatio="none"
+              viewBox="0 0 160 50"
+            >
+              <defs>
+                <linearGradient id="mrrGrad" x1="0%" x2="0%" y1="0%" y2="100%">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.55" />
+                  <stop offset="100%" stopColor="#34d399" stopOpacity="0.05" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M 0,45 Q 40,40 70,22 T 120,28 T 160,10 L 160,50 L 0,50 Z"
+                fill="url(#mrrGrad)"
+              />
+              <path
+                d="M 0,45 Q 40,40 70,22 T 120,28 T 160,10"
+                fill="none"
+                stroke="#059669"
+                strokeLinecap="round"
+                strokeWidth="2.5"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* KPI 3: Facas Ativas */}
+        <div
+          onClick={() => onNavigate('esteira')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+              Facas na Bancada
+            </span>
+            <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+              {activeProductionCount}
+            </div>
+            <div className="text-[11px] font-bold text-indigo-700 mt-1">
+              Em produção ativa
+            </div>
+          </div>
+          <div className="mt-3 h-12 flex items-center justify-center">
+            <svg className="w-full h-10 drop-shadow-sm" viewBox="0 0 160 40">
+              <g fill="#6366f1" opacity="0.8">
+                {[10, 28, 46, 64, 82, 100, 118, 136, 150].map((cx) =>
+                  [8, 19, 30].map((cy) => (
+                    <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="2.2" />
+                  ))
+                )}
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        {/* KPI 4: Prontas / Expedição */}
+        <div
+          onClick={() => onNavigate('entregas')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+              Prontas / Exped.
+            </span>
+            <div className="text-2xl font-black text-emerald-700 mt-2 tracking-tight">
+              {readyCount}
+            </div>
+            <div className="text-[11px] font-bold text-slate-600 mt-1">
+              {deliveries.length} saída(s) logísticas
+            </div>
+          </div>
+          <div className="mt-3 h-12 -mx-4 -mb-4 overflow-hidden">
+            <svg
+              className="w-full h-full"
+              preserveAspectRatio="none"
+              viewBox="0 0 160 50"
+            >
+              <defs>
+                <linearGradient id="readyGrad" x1="0%" x2="0%" y1="0%" y2="100%">
+                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.45" />
+                  <stop offset="100%" stopColor="#818cf8" stopOpacity="0.05" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M 0,42 Q 35,34 68,26 T 118,16 T 160,12 L 160,50 L 0,50 Z"
+                fill="url(#readyGrad)"
+              />
+              <path
+                d="M 0,42 Q 35,34 68,26 T 118,16 T 160,12"
+                fill="none"
+                stroke="#4f46e5"
+                strokeLinecap="round"
+                strokeWidth="2.5"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* KPI 5: Empresas CRM */}
+        <div
+          onClick={() => onNavigate('empresas')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+              Empresas Ativas
+            </span>
+            <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+              {companies.length}
+            </div>
+            <div className="text-[11px] font-bold text-indigo-700 mt-1">
+              Base CRM cadastrada
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5">
+            <span className="h-2 flex-1 rounded-full bg-indigo-500/75" />
+            <span className="h-2 w-8 rounded-full bg-sky-400/75" />
+            <span className="h-2 w-5 rounded-full bg-purple-400/75" />
+          </div>
+        </div>
+
+        {/* KPI 6: Atenção / Vencidos & Retornos */}
+        <div
+          onClick={() => onNavigate('financeiro')}
+          className="liquid-glass rounded-[26px] p-4 flex flex-col justify-between overflow-hidden group hover:-translate-y-1 cursor-pointer"
+        >
+          <div>
+            <span className="text-xs font-bold text-slate-700 frosted-text-depth">
+              Alertas &amp; Retornos
+            </span>
+            <div className="text-2xl font-black text-indigo-700 mt-2 tracking-tight">
+              {financials.overdueCount + openReturnsCount}
+            </div>
+            <div className="text-[11px] font-bold text-slate-600 mt-1">
+              {financials.overdueCount} vencido(s) • {openReturnsCount} ajuste(s)
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5">
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-indigo-500/15 text-indigo-800 border border-indigo-300/60">
+              {formatBRL(financials.overdueTotal)}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* MAIN BENTO ROW: HERO + FINANCIAL PULSE + MODALITY CHART */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+        {/* HERO LIQUID GLASS COMMAND CARD (5 Cols) */}
+        <div className="md:col-span-5 liquid-glass rounded-[28px] p-6 flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-rose-900/60 text-rose-200 border border-rose-700/50">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-800 border border-indigo-300/60 backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
                 Operação em Tempo Real
               </span>
-              <h2 className="text-2xl font-bold tracking-tight text-slate-50 mt-3 leading-snug">
-                Controle Industrial <span className="text-rose-400">Zero Papel</span>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 mt-3 leading-snug frosted-text-depth">
+                Controle Industrial
               </h2>
-              <p className="text-xs text-zinc-400 mt-1 max-w-sm">
-                Rastreamento completo desde o arquivo CAD recebido até a saída logística e faturamento de 30 dias.
+              <p className="text-xs font-medium text-slate-700 mt-1.5 max-w-sm leading-relaxed">
+                Rastreamento completo desde o arquivo CAD recebido até a saída
+                logística e faturamento.
               </p>
             </div>
-            <button
-              onClick={onOpenNewOrder}
-              className="w-11 h-11 rounded-2xl bg-rose-700 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-950/80 transition cursor-pointer shrink-0"
-              title="Registrar Nova Ordem de Serviço"
-            >
-              <Plus className="w-5 h-5 stroke-[2.5]" />
-            </button>
           </div>
 
-          {/* Big Numbers Row (V22 Style) */}
-          <div className="grid grid-cols-3 gap-3 mt-6 pt-5 border-t border-rose-900/40">
+          <div className="grid grid-cols-3 gap-3 mt-6 pt-5 border-t border-white/60">
             <div>
-              <span className="text-[11px] text-zinc-400 block">Facas Ativas</span>
-              <span className="text-3xl font-extrabold text-slate-50 tracking-tight">
+              <span className="text-[11px] font-semibold text-slate-600 block">
+                Facas Ativas
+              </span>
+              <span className="text-3xl font-black text-slate-900 tracking-tight">
                 {activeProductionCount}
               </span>
-              <span className="text-[10px] text-amber-400 block mt-0.5">Na bancada</span>
+              <span className="text-[10px] font-bold text-indigo-700 block mt-0.5">
+                Na bancada
+              </span>
             </div>
             <div>
-              <span className="text-[11px] text-zinc-400 block">Prontas / Exped.</span>
-              <span className="text-3xl font-extrabold text-emerald-400 tracking-tight">
+              <span className="text-[11px] font-semibold text-slate-600 block">
+                Prontas
+              </span>
+              <span className="text-3xl font-black text-emerald-700 tracking-tight">
                 {readyCount}
               </span>
-              <span className="text-[10px] text-zinc-400 block mt-0.5">Finalizadas</span>
+              <span className="text-[10px] font-bold text-slate-600 block mt-0.5">
+                Finalizadas
+              </span>
             </div>
             <div>
-              <span className="text-[11px] text-zinc-400 block">Empresas</span>
-              <span className="text-3xl font-extrabold text-rose-400 tracking-tight">
+              <span className="text-[11px] font-semibold text-slate-600 block">
+                Empresas
+              </span>
+              <span className="text-3xl font-black text-indigo-700 tracking-tight">
                 {companies.length}
               </span>
-              <span className="text-[10px] text-zinc-400 block mt-0.5">Cadastradas</span>
+              <span className="text-[10px] font-bold text-slate-600 block mt-0.5">
+                Cadastradas
+              </span>
             </div>
           </div>
         </div>
 
-        {/* BENTO CARD 2: 3 CORE FINANCIAL INDICATORS (4 Cols) */}
+        {/* FINANCIAL PULSE CARD (4 Cols) */}
         <div
           onClick={() => onNavigate('financeiro')}
-          className="md:col-span-4 rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 hover:border-zinc-700 transition cursor-pointer flex flex-col justify-between group"
+          className="md:col-span-4 liquid-glass rounded-[28px] p-6 cursor-pointer flex flex-col justify-between group hover:-translate-y-0.5"
         >
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Pulso Financeiro (30/60d)
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                Pulso Financeiro
               </span>
-              <p className="text-3xl font-extrabold text-emerald-400 tracking-tight mt-1">
+              <p className="text-3xl font-black text-emerald-700 tracking-tight mt-1">
                 {formatBRL(financials.receivable30d)}
               </p>
-              <span className="text-[11px] text-zinc-400">
-                A receber programado ({financials.receivableCount} títulos)
+              <span className="text-[11px] font-semibold text-slate-600">
+                A receber programado • {financials.receivableCount} títulos
               </span>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-zinc-800 group-hover:bg-rose-800 text-zinc-300 group-hover:text-white flex items-center justify-center transition">
+            <div className="w-10 h-10 rounded-full liquid-glass-pill group-hover:bg-indigo-600 text-slate-700 group-hover:text-indigo-700 flex items-center justify-center transition">
               <ArrowUpRight className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-zinc-800">
-            <div className="p-3 rounded-2xl bg-rose-950/30 border border-rose-800/40">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-400">
+          <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-white/60">
+            <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-300/60 backdrop-blur-md">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-700">
                 <AlertCircle className="w-3.5 h-3.5" />
                 <span>Vencidos</span>
               </div>
-              <p className="text-lg font-bold text-rose-400 mt-1">
+              <p className="text-lg font-black text-slate-900 mt-1">
                 {formatBRL(financials.overdueTotal)}
               </p>
-              <span className="text-[10px] text-zinc-400">
+              <span className="text-[10px] font-semibold text-slate-600">
                 {financials.overdueCount} título(s)
               </span>
             </div>
 
-            <div className="p-3 rounded-2xl bg-amber-950/20 border border-amber-700/30">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400">
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-300/60 backdrop-blur-md">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800">
                 <FileWarning className="w-3.5 h-3.5" />
                 <span>Entregues s/ Nota</span>
               </div>
-              <p className="text-lg font-bold text-amber-400 mt-1">
+              <p className="text-lg font-black text-amber-800 mt-1">
                 {formatBRL(financials.unbilledTotal)}
               </p>
-              <span className="text-[10px] text-zinc-400">
+              <span className="text-[10px] font-semibold text-slate-600">
                 {financials.unbilledCount} s/ cobrança
               </span>
             </div>
           </div>
         </div>
 
-        {/* BENTO CARD 3: PAYMENT MODALITY MINI PILL CHART (3 Cols) */}
+        {/* PAYMENT MODALITY PILL CHART (3 Cols) */}
         <div
           onClick={() => onNavigate('financeiro')}
-          className="md:col-span-3 rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 hover:border-zinc-700 transition cursor-pointer flex flex-col justify-between"
+          className="md:col-span-3 liquid-glass rounded-[28px] p-6 cursor-pointer flex flex-col justify-between hover:-translate-y-0.5"
         >
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-zinc-400">Modalidades</span>
-              <h3 className="text-sm font-bold text-slate-100 mt-0.5">
-                Volume Total: {formatBRL(financials.totalVolume)}
+              <span className="text-xs font-bold text-slate-600">
+                Modalidades
+              </span>
+              <h3 className="text-sm font-extrabold text-slate-900 mt-0.5">
+                {formatBRL(financials.totalVolume)}
               </h3>
             </div>
-            <CalendarClock className="w-4 h-4 text-rose-400" />
+            <CalendarClock className="w-4 h-4 text-indigo-600" />
           </div>
 
-          {/* Vertical Pill Bars (Dashboard V22 Style) */}
           <div className="flex items-end justify-between gap-2 h-28 pt-4">
             {financials.byModality.map((item) => {
               const heightPct = Math.max(14, item.percentage);
               return (
                 <div
                   key={item.modality}
-                  className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end"
+                  className="flex-1 min-w-0 flex flex-col items-center gap-1.5 h-full justify-end"
                 >
-                  <span className="text-[10px] font-bold text-zinc-300">
+                  <span className="text-[10px] font-extrabold text-slate-800">
                     {item.percentage}%
                   </span>
-                  <div className="w-full bg-zinc-800/80 rounded-2xl h-full flex items-end p-0.5">
+                  <div className="w-full bg-white/45 border border-white/70 rounded-2xl h-full flex items-end p-0.5 shadow-inner">
                     <div
                       style={{
                         height: `${heightPct}%`,
                         backgroundColor: item.colorHex,
                       }}
-                      className="w-full rounded-xl transition-all duration-500"
+                      className="w-full rounded-xl transition-all duration-500 shadow-sm"
                     />
                   </div>
-                  <span className="text-[9px] text-zinc-400 truncate max-w-full">
+                  <span className="text-[9px] font-bold text-slate-700 truncate max-w-full">
                     {PAYMENT_MODALITY_META[item.modality]?.short.split(' ')[0]}
                   </span>
                 </div>
@@ -205,26 +437,27 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
         </div>
       </div>
 
-      {/* SECOND ROW: 6-STAGE PRODUCTION PIPELINE BENTO STRIP */}
-      <div className="rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90">
+      {/* SECOND ROW: 6-STAGE PRODUCTION PIPELINE */}
+      <div className="liquid-glass rounded-[28px] p-6">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-rose-900/40 border border-rose-700/40 flex items-center justify-center text-rose-400">
+            <div className="w-9 h-9 rounded-2xl bg-indigo-500/15 border border-indigo-300/60 flex items-center justify-center text-indigo-700">
               <Kanban className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-50">
-                Esteira Física da Oficina (6 Etapas de Fabricação)
+              <h3 className="text-sm font-extrabold text-slate-900 frosted-text-depth">
+                Esteira Física da Oficina
               </h3>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs font-medium text-slate-600">
                 Visão instantânea de onde está cada faca neste momento
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={() => onNavigate('esteira')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl text-xs font-semibold bg-zinc-800 hover:bg-rose-800 text-slate-200 hover:text-white transition cursor-pointer"
+            className="liquid-glass-pill inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold text-slate-800 hover:text-indigo-700 cursor-pointer"
           >
             <span>Abrir Esteira Completa</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
@@ -238,16 +471,18 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
               <div
                 key={st.id}
                 onClick={() => onNavigate('esteira')}
-                className="p-4 rounded-2xl bg-zinc-950/70 border border-zinc-800/80 hover:border-rose-700/50 transition cursor-pointer flex flex-col justify-between"
+                className="p-4 rounded-2xl liquid-glass-subtle hover:bg-white/45 transition cursor-pointer flex flex-col justify-between"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">
                     Etapa {st.step}
                   </span>
-                  <span className={`w-2 h-2 rounded-full ${st.dotClass}`} />
+                  <span className={`w-2.5 h-2.5 rounded-full ${st.dotClass}`} />
                 </div>
-                <p className="text-2xl font-extrabold text-slate-50 mt-2">{count}</p>
-                <span className="text-xs font-semibold text-zinc-300 mt-1 block truncate">
+                <p className="text-2xl font-black text-slate-900 mt-2">
+                  {count}
+                </p>
+                <span className="text-xs font-bold text-slate-700 mt-1 block truncate">
                   {st.label}
                 </span>
               </div>
@@ -256,21 +491,22 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
         </div>
       </div>
 
-      {/* THIRD ROW: 3 BENTO WIDGETS (COMPANIES CRM, LOGISTICS DELIVERIES, WARRANTY RETURNS) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      {/* THIRD ROW: 4 LIQUID GLASS WIDGETS (CRM, LOGÍSTICA, RETORNOS, ESTOQUE) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {/* Widget 1: Empresas & Ferramental */}
-        <div className="rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 flex flex-col justify-between">
+        <div className="liquid-glass rounded-[28px] p-6 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-rose-400" />
-                <h3 className="text-sm font-bold text-slate-50">
-                  Empresas & Ferramental
+                <Building2 className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Empresas &amp; Ferramental
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => onNavigate('empresas')}
-                className="text-xs font-semibold text-rose-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                className="text-xs font-bold text-indigo-700 hover:underline flex items-center gap-0.5 cursor-pointer"
               >
                 Ver CRM <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
@@ -278,12 +514,14 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
 
             <div className="space-y-2.5">
               {companies.length === 0 ? (
-                <div className="p-6 rounded-2xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                <div className="p-6 rounded-2xl border border-dashed border-white/70 text-center text-xs font-medium text-slate-600">
                   Nenhuma empresa cadastrada.
                 </div>
               ) : (
                 companies.slice(0, 4).map((comp) => {
-                  const compOrders = orders.filter((o) => o.companyId === comp.id);
+                  const compOrders = orders.filter(
+                    (o) => o.companyId === comp.id
+                  );
                   return (
                     <div
                       key={comp.id}
@@ -291,17 +529,17 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
                         onSelectCompany(comp.id);
                         onNavigate('empresas');
                       }}
-                      className="p-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-rose-700/50 flex items-center justify-between transition cursor-pointer"
+                      className="p-3 rounded-2xl liquid-glass-subtle hover:bg-white/45 flex items-center justify-between transition cursor-pointer"
                     >
                       <div className="truncate pr-2">
-                        <p className="text-xs font-bold text-slate-100 truncate">
+                        <p className="text-xs font-bold text-slate-900 truncate">
                           {comp.corporateName}
                         </p>
-                        <span className="text-[11px] text-zinc-500 font-mono">
+                        <span className="text-[11px] text-slate-600 font-mono">
                           {comp.cnpj}
                         </span>
                       </div>
-                      <span className="px-2.5 py-1 rounded-xl bg-zinc-800 text-zinc-200 text-xs font-bold shrink-0">
+                      <span className="px-2.5 py-1 rounded-full bg-white/65 border border-white/80 text-slate-800 text-xs font-extrabold shrink-0">
                         {compOrders.length} facas
                       </span>
                     </div>
@@ -312,19 +550,20 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
           </div>
         </div>
 
-        {/* Widget 2: Últimas Entregas & Logística */}
-        <div className="rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 flex flex-col justify-between">
+        {/* Widget 2: Logística de Saída */}
+        <div className="liquid-glass rounded-[28px] p-6 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-bold text-slate-50">
+                <Truck className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-extrabold text-slate-900">
                   Logística de Saída
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => onNavigate('entregas')}
-                className="text-xs font-semibold text-rose-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                className="text-xs font-bold text-indigo-700 hover:underline flex items-center gap-0.5 cursor-pointer"
               >
                 Ver Saídas <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
@@ -332,7 +571,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
 
             <div className="space-y-2.5">
               {deliveries.length === 0 ? (
-                <div className="p-6 rounded-2xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                <div className="p-6 rounded-2xl border border-dashed border-white/70 text-center text-xs font-medium text-slate-600">
                   Nenhuma saída registrada.
                 </div>
               ) : (
@@ -340,21 +579,21 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
                   <div
                     key={del.id}
                     onClick={() => onNavigate('entregas')}
-                    className="p-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-zinc-700 transition cursor-pointer"
+                    className="p-3 rounded-2xl liquid-glass-subtle hover:bg-white/45 transition cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-slate-100 truncate">
+                      <span className="text-xs font-bold text-slate-900 truncate">
                         {del.orderId} • {del.companyName}
                       </span>
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
                           DELIVERY_METHOD_META[del.method]?.badgeClass
                         }`}
                       >
                         {DELIVERY_METHOD_META[del.method]?.label}
                       </span>
                     </div>
-                    <p className="text-[11px] text-zinc-400 mt-1 truncate">
+                    <p className="text-[11px] font-medium text-slate-600 mt-1 truncate">
                       {del.carrierOrPersonName} • {del.dispatchedAt}
                     </p>
                   </div>
@@ -364,19 +603,20 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
           </div>
         </div>
 
-        {/* Widget 3: Retornos & Ajustes de Garantia */}
-        <div className="rounded-3xl p-6 bg-zinc-900/90 border border-zinc-800/90 flex flex-col justify-between">
+        {/* Widget 3: Retornos & Garantia */}
+        <div className="liquid-glass rounded-[28px] p-6 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <Wrench className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold text-slate-50">
-                  Retornos & Garantia
+                <Wrench className="w-4 h-4 text-amber-600" />
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Retornos &amp; Garantia
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => onNavigate('retornos')}
-                className="text-xs font-semibold text-rose-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                className="text-xs font-bold text-indigo-700 hover:underline flex items-center gap-0.5 cursor-pointer"
               >
                 Ver Bancada <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
@@ -384,7 +624,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
 
             <div className="space-y-2.5">
               {returns.length === 0 ? (
-                <div className="p-6 rounded-2xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                <div className="p-6 rounded-2xl border border-dashed border-white/70 text-center text-xs font-medium text-slate-600">
                   Nenhum retorno registrado.
                 </div>
               ) : (
@@ -394,25 +634,106 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
                     <div
                       key={ret.id}
                       onClick={() => onNavigate('retornos')}
-                      className="p-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-zinc-700 transition cursor-pointer"
+                      className="p-3 rounded-2xl liquid-glass-subtle hover:bg-white/45 transition cursor-pointer"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-100 truncate">
+                        <span className="text-xs font-bold text-slate-900 truncate">
                           {ret.orderId} • {ret.companyName}
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${stMeta.badgeClass}`}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${stMeta.badgeClass}`}
                         >
                           {stMeta.label}
                         </span>
                       </div>
-                      <p className="text-[11px] text-zinc-400 mt-1 truncate">
+                      <p className="text-[11px] font-medium text-slate-600 mt-1 truncate">
                         Motivo: {ret.reason}
                       </p>
                     </div>
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* Widget 4: Estoque — Itens em Falta por Categoria */}
+        <div className="liquid-glass rounded-[28px] p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Package className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Estoque em Falta
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('estoque')}
+                className="text-xs font-bold text-indigo-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+              >
+                Ver Estoque <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {/* Madeiras Summary */}
+              <div
+                onClick={() => onNavigate('estoque')}
+                className={`p-3.5 rounded-2xl liquid-glass-subtle hover:bg-white/45 transition cursor-pointer ${
+                  lowMadeiras.length > 0 ? 'ring-1 ring-amber-400/70' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-slate-900">
+                    1. Madeiras
+                  </span>
+                  {lowMadeiras.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-900 border border-amber-400/70">
+                      <AlertTriangle className="w-3 h-3 text-amber-700" />
+                      {lowMadeiras.length} em falta
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-800 border border-emerald-300/60">
+                      0 em falta
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium text-slate-600 mt-1 truncate">
+                  {lowMadeiras.length > 0
+                    ? `Repor: ${lowMadeiras.map((i) => i.name).join(', ')}`
+                    : `${madeirasStock.length} item(ns) cadastrado(s)`}
+                </p>
+              </div>
+
+              {/* Lâminas Summary */}
+              <div
+                onClick={() => onNavigate('estoque')}
+                className={`p-3.5 rounded-2xl liquid-glass-subtle hover:bg-white/45 transition cursor-pointer ${
+                  lowLaminas.length > 0 ? 'ring-1 ring-amber-400/70' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-slate-900">
+                    2. Lâminas
+                  </span>
+                  {lowLaminas.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-900 border border-amber-400/70">
+                      <AlertTriangle className="w-3 h-3 text-amber-700" />
+                      {lowLaminas.length} em falta
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-800 border border-emerald-300/60">
+                      0 em falta
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium text-slate-600 mt-1 truncate">
+                  {lowLaminas.length > 0
+                    ? `Repor: ${lowLaminas.map((i) => i.name).join(', ')}`
+                    : `${laminasStock.length} item(ns) cadastrado(s)`}
+                </p>
+              </div>
             </div>
           </div>
         </div>
