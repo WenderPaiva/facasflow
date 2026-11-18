@@ -16,13 +16,13 @@ import {
 } from 'lucide-react';
 import {
   DieOrder,
-  ExpenseCategoryKey,
+  ExpenseRecord,
   InvestmentRecord,
-  MonthlyExpenseRecord,
   PaymentStatus,
   PayrollEmployeeRecord,
   ServiceProviderRecord,
 } from '../types/order';
+import { ExpenseDraftPayload } from '../services/supabaseDataService';
 import {
   buildPixClipboardSnippet,
   buildWhatsAppBillingUrl,
@@ -33,7 +33,7 @@ import {
   PAYMENT_MODALITY_META,
 } from '../utils/financeEngine';
 import { CollaboratorsSubsection } from './CollaboratorsSubsection';
-import { ExpensesSubsection } from './ExpensesSubsection';
+import { ExpensesSection } from './ExpensesSection';
 import { InvestmentsSubsection } from './InvestmentsSubsection';
 
 type FinanceTab = 'visao' | 'despesas' | 'colaboradores' | 'investimentos';
@@ -41,17 +41,17 @@ type FinanceTab = 'visao' | 'despesas' | 'colaboradores' | 'investimentos';
 interface FinanceAnalyticsSectionProps {
   orders: DieOrder[];
   financials: FinancialBreakdown;
-  expenses: MonthlyExpenseRecord[];
+  despesas: ExpenseRecord[];
+  canEditDespesas: boolean;
   serviceProviders: ServiceProviderRecord[];
   payrollEmployees: PayrollEmployeeRecord[];
   investments: InvestmentRecord[];
   onTogglePaid: (orderId: string) => void;
   onEmitBilling30d: (orderId: string) => void;
   onDeleteOrder: (orderId: string) => void;
-  onUpsertMonthExpenses: (
-    month: string,
-    values: Record<ExpenseCategoryKey, number>
-  ) => void;
+  onCreateExpense: (payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
+  onUpdateExpense: (id: string, payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
+  onDeleteExpense: (id: string) => Promise<void>;
   onAddProvider: (
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
   ) => void;
@@ -81,14 +81,17 @@ interface FinanceAnalyticsSectionProps {
 export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = ({
   orders,
   financials,
-  expenses,
+  despesas,
+  canEditDespesas,
   serviceProviders,
   payrollEmployees,
   investments,
   onTogglePaid,
   onEmitBilling30d,
   onDeleteOrder,
-  onUpsertMonthExpenses,
+  onCreateExpense,
+  onUpdateExpense,
+  onDeleteExpense,
   onAddProvider,
   onUpdateProvider,
   onDeleteProvider,
@@ -146,15 +149,15 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
     });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0">
       {/* Header & Finance Module Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 min-w-0">
+        <div className="min-w-0">
           <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
             Finanças e Formas de Pagamento
           </h2>
           <p className="text-xs font-medium text-slate-700">
-            Controle do ciclo financeiro, despesas mensais, colaboradores e investimentos.
+            Controle do ciclo financeiro, despesas operacionais, colaboradores e investimentos.
           </p>
         </div>
 
@@ -174,7 +177,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
                   active
                     ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md border border-white/40'
                     : 'liquid-glass-pill text-slate-700'
@@ -189,9 +192,12 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
       </div>
 
       {activeTab === 'despesas' && (
-        <ExpensesSubsection
-          expenses={expenses}
-          onUpsertMonthExpenses={onUpsertMonthExpenses}
+        <ExpensesSection
+          expenses={despesas}
+          canEdit={canEditDespesas}
+          onCreateExpense={onCreateExpense}
+          onUpdateExpense={onUpdateExpense}
+          onDeleteExpense={onDeleteExpense}
         />
       )}
 
@@ -300,8 +306,8 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
           </div>
 
           {/* 2. GRÁFICO DE FORMAS DE PAGAMENTO */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-            <div className="lg:col-span-5 liquid-glass rounded-[28px] p-6 flex flex-col justify-between">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-w-0">
+            <div className="lg:col-span-5 liquid-glass rounded-[28px] p-6 flex flex-col justify-between min-w-0">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
@@ -314,7 +320,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                 <PieChart className="w-5 h-5 text-indigo-600" />
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center justify-around gap-6 my-4">
+              <div className="flex flex-col md:flex-row items-center justify-around gap-6 my-4">
                 <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
                   <svg className="w-44 h-44 -rotate-90" viewBox="0 0 180 180">
                     <circle
@@ -447,7 +453,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                     key={pill.id}
                     type="button"
                     onClick={() => setStatusFilter(pill.id)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+                    className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold transition cursor-pointer ${
                       statusFilter === pill.id
                         ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md border border-white/40'
                         : 'liquid-glass-pill text-slate-700'
@@ -463,7 +469,146 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
               </span>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile Labeled Cards (< 768px) */}
+            <div className="md:hidden divide-y divide-white/55">
+              {filteredOrders.length === 0 ? (
+                <div className="py-10 px-4 text-center font-medium text-xs text-slate-600">
+                  Nenhum lançamento financeiro registrado ainda.
+                </div>
+              ) : (
+                filteredOrders.map((order) => {
+                  const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
+                  const daysDiff = getDaysDiff(order.dueDate);
+                  const isCopied = copiedId === order.id;
+
+                  return (
+                    <div key={order.id} className="p-4 space-y-2.5 text-xs min-w-0">
+                      <div className="flex items-start justify-between gap-2 min-w-0">
+                        <div className="min-w-0">
+                          <span className="font-mono font-extrabold text-indigo-700 block">
+                            {order.id}
+                          </span>
+                          <span className="font-bold text-slate-900 break-words">
+                            {order.companyName}
+                          </span>
+                        </div>
+                        <span className="font-mono text-base font-black text-slate-900 shrink-0">
+                          {formatBRL(order.amount)}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 font-semibold block">Ferramenta</span>
+                        <span className="text-slate-800 font-semibold break-words">
+                          {order.toolDescription}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${modMeta?.badgeClass}`}
+                        >
+                          {modMeta?.label}
+                        </span>
+
+                        {order.paymentStatus === 'pago' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-800 border border-emerald-300/60">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                            Liquidado • {formatDateBR(order.paidAt || order.dueDate)}
+                          </span>
+                        ) : order.paymentStatus === 'nao_pago' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/60 text-slate-700 border border-white/80">
+                            Não Pago
+                          </span>
+                        ) : order.paymentStatus === 'sem_nota' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-800 border border-amber-300/60">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Entregue sem Nota
+                          </span>
+                        ) : order.paymentStatus === 'vencido' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-900 border border-amber-400/70">
+                            Vencido há {Math.abs(daysDiff)}d • {formatDateBR(order.dueDate)}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-800 border border-indigo-300/60">
+                            Vence em {daysDiff}d • {formatDateBR(order.dueDate)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPix(order)}
+                          className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold border inline-flex items-center gap-1.5 cursor-pointer ${
+                            isCopied
+                              ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-800'
+                              : 'liquid-glass-pill text-slate-800'
+                          }`}
+                        >
+                          {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          <span>{isCopied ? 'Copiado' : 'Copiar Pix'}</span>
+                        </button>
+
+                        <a
+                          href={buildWhatsAppBillingUrl(order)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5"
+                        >
+                          <MessageCircle className="w-4 h-4 text-emerald-600" />
+                          <span>WhatsApp</span>
+                        </a>
+
+                        {order.paymentStatus === 'sem_nota' ? (
+                          <button
+                            type="button"
+                            onClick={() => onEmitBilling30d(order.id)}
+                            className="min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold bg-amber-500 text-white inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            <span>Gerar 30d</span>
+                          </button>
+                        ) : order.paymentStatus !== 'nao_pago' ? (
+                          <button
+                            type="button"
+                            onClick={() => onTogglePaid(order.id)}
+                            className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
+                              order.paymentStatus === 'pago'
+                                ? 'liquid-glass-pill text-slate-700'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {order.paymentStatus === 'pago' ? (
+                              <>
+                                <RotateCcw className="w-4 h-4" />
+                                <span>Reabrir</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4" />
+                                <span>Marcar Pago</span>
+                              </>
+                            )}
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={() => onDeleteOrder(order.id)}
+                          aria-label="Apagar esta OS"
+                          className="min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wider text-slate-600 border-b border-white/60 bg-white/30">

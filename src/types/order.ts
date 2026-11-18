@@ -34,7 +34,8 @@ export type ActiveSection =
   | 'retornos'
   | 'estoque'
   | 'notas'
-  | 'equipe';
+  | 'equipe'
+  | 'configuracoes';
 
 export type NoteStatus = 'rascunho' | 'emitida' | 'impressa' | 'cancelada';
 
@@ -69,6 +70,7 @@ export type StockCategory = 'madeiras' | 'laminas';
 
 export interface StockItem {
   id: string; // e.g., "EST-001"
+  dbUuid?: string;
   company_id?: string;
   category: StockCategory;
   name: string;
@@ -96,6 +98,7 @@ export interface TenantAccount {
 export interface AuthSession {
   userId?: string;
   company_id: string;
+  empresaId?: string; // UUID da tabela empresas no Supabase
   companyName: string;
   ownerName: string;
   email: string;
@@ -106,6 +109,7 @@ export interface AuthSession {
 
 export interface Company {
   id: string;
+  dbUuid?: string;
   company_id?: string; // Tenant owner ID
   corporateName: string; // Razão Social / Nome Fantasia do cliente da facaria
   cnpj: string;
@@ -121,15 +125,17 @@ export interface StageLog {
 
 export interface DieOrder {
   id: string; // e.g., "OS-001"
+  dbUuid?: string;
   company_id?: string; // Tenant owner ID
   companyId: string;
+  companyUuid?: string;
   companyName: string;
   companyPhone: string;
   toolDescription: string; // e.g., "Faca Caixa Duplex Tampa e Fundo"
   bladeMeters?: number;
   woodMm?: 15 | 18 | 22;
   amount: number; // Valor (R$)
-  paymentModality: PaymentModality; // PIX, Dinheiro, Cartão, A Prazo - 30/60d, Cortesia / Não Paga
+  paymentModality: PaymentModality; // PIX, Dinheiro, Cartão, Boleto, Não Pago
   paymentStatus: PaymentStatus;
   stage: ProductionStage;
   stageUpdatedAt: string; // Data/hora da última movimentação na esteira
@@ -143,6 +149,7 @@ export interface DieOrder {
 
 export interface DeliveryRecord {
   id: string; // e.g., "ENT-001"
+  dbUuid?: string;
   company_id?: string; // Tenant owner ID
   orderId: string;
   toolDescription: string;
@@ -155,6 +162,7 @@ export interface DeliveryRecord {
 
 export interface WarrantyReturnRecord {
   id: string; // e.g., "RET-001"
+  dbUuid?: string;
   company_id?: string; // Tenant owner ID
   orderId: string; // OS original
   companyName: string;
@@ -177,7 +185,42 @@ export type ExpenseCategoryKey =
   | 'manutencao'
   | 'contador'
   | 'marketing'
-  | 'financiamento';
+  | 'financiamento'
+  | 'laminas'
+  | 'madeira'
+  | 'seguros'
+  | 'impostos'
+  | 'outros';
+
+export type ExpenseStatus = 'pendente' | 'pago' | 'cancelado';
+export type ExpenseDisplayStatus = ExpenseStatus | 'atrasado';
+export type ExpensePaymentMethod =
+  | 'pix'
+  | 'boleto_15'
+  | 'boleto_30'
+  | 'dinheiro'
+  | 'cartao'
+  | 'nao_pago';
+
+export interface ExpenseRecord {
+  id: string;
+  empresa_id?: string;
+  categoria: ExpenseCategoryKey;
+  descricao: string;
+  valor: number;
+  data_competencia: string; // YYYY-MM-DD
+  data_vencimento?: string; // YYYY-MM-DD
+  data_pagamento?: string; // YYYY-MM-DD
+  status: ExpenseStatus;
+  forma_pagamento: ExpensePaymentMethod;
+  fornecedor?: string;
+  observacao?: string;
+  created_by?: string;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string | null;
+}
 
 export interface MonthlyExpenseRecord {
   month: string; // YYYY-MM
@@ -185,10 +228,47 @@ export interface MonthlyExpenseRecord {
   updatedAt: string;
 }
 
+export type BackupType = 'automatico' | 'manual' | 'pre_restauracao';
+
+export interface BackupRecord {
+  id: string;
+  empresa_id: string;
+  tipo: BackupType;
+  schema_version: number;
+  storage_path?: string | null;
+  resumo_tabelas: Record<string, number>;
+  tamanho_bytes: number;
+  sha256: string;
+  criado_por?: string | null;
+  created_at: string;
+  expira_em: string;
+}
+
+export interface BackupLogRecord {
+  id: string;
+  empresa_id: string;
+  backup_id?: string | null;
+  tipo: BackupType;
+  status: 'sucesso' | 'erro';
+  mensagem: string;
+  alerta_dispensado: boolean;
+  executado_por?: string | null;
+  created_at: string;
+}
+
+export interface CompanySettingsRecord {
+  empresa_id: string;
+  retencao_diaria: number;
+  retencao_mensal: number;
+  backup_automatico: boolean;
+  updated_at?: string;
+}
+
 export type ServiceProviderStatus = 'pendente' | 'pago' | 'atrasado';
 
 export interface ServiceProviderRecord {
   id: string; // e.g., "PST-001"
+  dbUuid?: string;
   company_id?: string;
   name: string;
   service: string;
@@ -201,6 +281,7 @@ export interface ServiceProviderRecord {
 
 export interface PayrollEmployeeRecord {
   id: string; // e.g., "FUN-001"
+  dbUuid?: string;
   company_id?: string;
   name: string;
   roleTitle: string;
@@ -213,6 +294,7 @@ export type InvestmentType = 'renda_fixa' | 'acoes' | 'fii' | 'outro';
 
 export interface InvestmentRecord {
   id: string; // e.g., "INV-001"
+  dbUuid?: string;
   company_id?: string;
   assetName: string;
   assetType: InvestmentType;
@@ -232,6 +314,7 @@ export interface EnterpriseDatabase {
   stock?: StockItem[];
   notas?: NoteRecord[];
   noteSequence?: number;
+  despesas?: ExpenseRecord[];
   expenses?: MonthlyExpenseRecord[];
   serviceProviders?: ServiceProviderRecord[];
   payrollEmployees?: PayrollEmployeeRecord[];

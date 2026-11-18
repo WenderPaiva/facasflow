@@ -2,6 +2,9 @@ import {
   DeliveryMethod,
   DieOrder,
   ExpenseCategoryKey,
+  ExpenseDisplayStatus,
+  ExpensePaymentMethod,
+  ExpenseRecord,
   InvestmentType,
   PaymentModality,
   PaymentStatus,
@@ -121,18 +124,70 @@ export const PAYMENT_MODALITY_META: Record<
   },
 };
 
-export const EXPENSE_CATEGORIES: { key: ExpenseCategoryKey; label: string }[] = [
-  { key: 'aluguel', label: 'Aluguel' },
-  { key: 'agua', label: 'Água' },
-  { key: 'energia', label: 'Energia' },
-  { key: 'internet', label: 'Internet' },
-  { key: 'alimentacao', label: 'Alimentação' },
-  { key: 'combustivel', label: 'Combustível' },
-  { key: 'manutencao', label: 'Manutenção' },
-  { key: 'contador', label: 'Contador' },
-  { key: 'marketing', label: 'Marketing' },
-  { key: 'financiamento', label: 'Financiamento' },
+export const EXPENSE_CATEGORIES: {
+  key: ExpenseCategoryKey;
+  label: string;
+  colorHex: string;
+  badgeClass: string;
+}[] = [
+  { key: 'aluguel', label: 'Aluguel', colorHex: '#4f46e5', badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-300/60' },
+  { key: 'agua', label: 'Água', colorHex: '#0ea5e9', badgeClass: 'bg-sky-500/15 text-sky-800 border-sky-300/60' },
+  { key: 'energia', label: 'Energia', colorHex: '#eab308', badgeClass: 'bg-yellow-500/15 text-yellow-800 border-yellow-300/60' },
+  { key: 'internet', label: 'Internet', colorHex: '#06b6d4', badgeClass: 'bg-cyan-500/15 text-cyan-800 border-cyan-300/60' },
+  { key: 'alimentacao', label: 'Alimentação', colorHex: '#f97316', badgeClass: 'bg-orange-500/15 text-orange-800 border-orange-300/60' },
+  { key: 'combustivel', label: 'Combustível', colorHex: '#ef4444', badgeClass: 'bg-red-500/15 text-red-800 border-red-300/60' },
+  { key: 'manutencao', label: 'Manutenção', colorHex: '#8b5cf6', badgeClass: 'bg-violet-500/15 text-violet-800 border-violet-300/60' },
+  { key: 'contador', label: 'Contador', colorHex: '#6366f1', badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-300/60' },
+  { key: 'marketing', label: 'Marketing', colorHex: '#ec4899', badgeClass: 'bg-pink-500/15 text-pink-800 border-pink-300/60' },
+  { key: 'financiamento', label: 'Financiamento', colorHex: '#64748b', badgeClass: 'bg-slate-500/15 text-slate-800 border-slate-300/60' },
+  { key: 'laminas', label: 'Lâminas', colorHex: '#14b8a6', badgeClass: 'bg-teal-500/15 text-teal-800 border-teal-300/60' },
+  { key: 'madeira', label: 'Madeira', colorHex: '#d97706', badgeClass: 'bg-amber-500/15 text-amber-900 border-amber-300/60' },
+  { key: 'seguros', label: 'Seguros', colorHex: '#2563eb', badgeClass: 'bg-blue-500/15 text-blue-800 border-blue-300/60' },
+  { key: 'impostos', label: 'Impostos', colorHex: '#dc2626', badgeClass: 'bg-rose-500/15 text-rose-800 border-rose-300/60' },
+  { key: 'outros', label: 'Outros', colorHex: '#71717a', badgeClass: 'bg-zinc-500/15 text-zinc-800 border-zinc-300/60' },
 ];
+
+export const EXPENSE_CATEGORY_MAP = Object.fromEntries(
+  EXPENSE_CATEGORIES.map((c) => [c.key, c])
+) as Record<ExpenseCategoryKey, (typeof EXPENSE_CATEGORIES)[number]>;
+
+export const EXPENSE_PAYMENT_META: Record<
+  ExpensePaymentMethod,
+  { label: string; short: string }
+> = {
+  pix: { label: 'Pix', short: 'Pix' },
+  boleto_15: { label: 'Boleto 15 dias', short: 'Boleto 15d' },
+  boleto_30: { label: 'Boleto 30 dias', short: 'Boleto 30d' },
+  dinheiro: { label: 'Dinheiro', short: 'Dinheiro' },
+  cartao: { label: 'Cartão', short: 'Cartão' },
+  nao_pago: { label: 'Não Pago', short: 'Não Pago' },
+};
+
+export const EXPENSE_STATUS_META: Record<
+  ExpenseDisplayStatus,
+  { label: string; badgeClass: string; dotClass: string }
+> = {
+  pago: {
+    label: 'Pago',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-400/60',
+    dotClass: 'bg-emerald-600',
+  },
+  pendente: {
+    label: 'Pendente',
+    badgeClass: 'bg-amber-500/15 text-amber-900 border-amber-400/60',
+    dotClass: 'bg-amber-500',
+  },
+  atrasado: {
+    label: 'Atrasado',
+    badgeClass: 'bg-rose-500/20 text-rose-800 border-rose-500/70',
+    dotClass: 'bg-rose-600',
+  },
+  cancelado: {
+    label: 'Cancelado',
+    badgeClass: 'bg-slate-500/15 text-slate-600 border-slate-300/70',
+    dotClass: 'bg-slate-400',
+  },
+};
 
 export const INVESTMENT_TYPE_META: Record<InvestmentType, { label: string }> = {
   renda_fixa: { label: 'Renda Fixa' },
@@ -153,6 +208,11 @@ export function createEmptyExpensesMap(): Record<ExpenseCategoryKey, number> {
     contador: 0,
     marketing: 0,
     financiamento: 0,
+    laminas: 0,
+    madeira: 0,
+    seguros: 0,
+    impostos: 0,
+    outros: 0,
   };
 }
 
@@ -223,11 +283,276 @@ export function formatBRL(value: number): string {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
+export function getTodayGoiasISO(date: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  } catch {
+    const goiasMs = date.getTime() - 3 * 3600 * 1000;
+    return new Date(goiasMs).toISOString().slice(0, 10);
+  }
+}
+
+export function formatDateTimeGoiasBR(isoDateOrTs?: string): string {
+  if (!isoDateOrTs) return '—';
+  const dt = new Date(isoDateOrTs);
+  if (Number.isNaN(dt.getTime())) return isoDateOrTs;
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(dt);
+  } catch {
+    return isoDateOrTs;
+  }
+}
+
 export function toISODate(date: Date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return getTodayGoiasISO(date);
+}
+
+export function roundCurrencyBRL(value: number): number {
+  const safe = Number(value);
+  if (!Number.isFinite(safe) || safe <= 0) return 0;
+  return Math.round(safe * 100) / 100;
+}
+
+export function formatDecimalBR(value: number): string {
+  const safe = Number.isFinite(value) ? roundCurrencyBRL(value) : 0;
+  return safe.toFixed(2).replace('.', ',');
+}
+
+export function computeExpenseEffectiveStatus(
+  expense: Pick<ExpenseRecord, 'status' | 'data_vencimento'>,
+  todayGoiasIso: string = getTodayGoiasISO()
+): ExpenseDisplayStatus {
+  if (
+    expense.status === 'pendente' &&
+    expense.data_vencimento &&
+    expense.data_vencimento.slice(0, 10) < todayGoiasIso.slice(0, 10)
+  ) {
+    return 'atrasado';
+  }
+  return expense.status;
+}
+
+export type ExpensePeriodPreset =
+  | 'mes_atual'
+  | 'mes_anterior'
+  | 'trimestre'
+  | 'ano'
+  | 'personalizado';
+
+export function getExpensePeriodRange(
+  preset: ExpensePeriodPreset,
+  customStart?: string,
+  customEnd?: string,
+  todayGoiasIso: string = getTodayGoiasISO()
+): { start: string; end: string } {
+  const [y, m] = todayGoiasIso.slice(0, 10).split('-').map(Number);
+  const lastDayOfMonth = (yr: number, mo: number) =>
+    String(new Date(yr, mo, 0).getDate()).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  if (preset === 'mes_atual') {
+    return {
+      start: `${y}-${pad(m)}-01`,
+      end: `${y}-${pad(m)}-${lastDayOfMonth(y, m)}`,
+    };
+  }
+  if (preset === 'mes_anterior') {
+    const prevY = m === 1 ? y - 1 : y;
+    const prevM = m === 1 ? 12 : m - 1;
+    return {
+      start: `${prevY}-${pad(prevM)}-01`,
+      end: `${prevY}-${pad(prevM)}-${lastDayOfMonth(prevY, prevM)}`,
+    };
+  }
+  if (preset === 'trimestre') {
+    const qStartMonth = Math.floor((m - 1) / 3) * 3 + 1;
+    const qEndMonth = qStartMonth + 2;
+    return {
+      start: `${y}-${pad(qStartMonth)}-01`,
+      end: `${y}-${pad(qEndMonth)}-${lastDayOfMonth(y, qEndMonth)}`,
+    };
+  }
+  if (preset === 'ano') {
+    return {
+      start: `${y}-01-01`,
+      end: `${y}-12-31`,
+    };
+  }
+  return {
+    start: (customStart || `${y}-${pad(m)}-01`).slice(0, 10),
+    end: (customEnd || todayGoiasIso).slice(0, 10),
+  };
+}
+
+export function validateExpenseInput(input: {
+  categoria: ExpenseCategoryKey;
+  descricao: string;
+  valor: number;
+  data_competencia: string;
+}): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const val = roundCurrencyBRL(input.valor);
+  if (!Number.isFinite(val) || val <= 0) {
+    errors.valor = 'Informe um valor maior que R$ 0,00.';
+  }
+  if (!input.data_competencia || !/^\d{4}-\d{2}-\d{2}$/.test(input.data_competencia.slice(0, 10))) {
+    errors.data_competencia = 'Informe a data de competência válida.';
+  }
+  if (input.categoria === 'outros' && input.descricao.trim().length < 3) {
+    errors.descricao = 'Para a categoria "Outros", a descrição é obrigatória (mínimo 3 caracteres).';
+  }
+  return errors;
+}
+
+export interface ExpensesSummary {
+  totalPeriodo: number;
+  totalPago: number;
+  totalPendente: number;
+  totalAtrasado: number;
+  countAtrasado: number;
+  countAtivos: number;
+  topCategory: {
+    key: ExpenseCategoryKey;
+    label: string;
+    colorHex: string;
+    amount: number;
+    percentage: number;
+  } | null;
+  byCategory: {
+    key: ExpenseCategoryKey;
+    label: string;
+    colorHex: string;
+    amount: number;
+    count: number;
+    percentage: number;
+  }[];
+}
+
+export function computeExpensesSummary(
+  expenses: ExpenseRecord[],
+  todayGoiasIso: string = getTodayGoiasISO()
+): ExpensesSummary {
+  let totalPeriodo = 0;
+  let totalPago = 0;
+  let totalPendente = 0;
+  let totalAtrasado = 0;
+  let countAtrasado = 0;
+  let countAtivos = 0;
+
+  const catTotals = new Map<ExpenseCategoryKey, { amount: number; count: number }>();
+
+  for (const exp of expenses) {
+    if (exp.deleted_at || exp.status === 'cancelado') continue;
+    const val = roundCurrencyBRL(exp.valor);
+    countAtivos += 1;
+    totalPeriodo = roundCurrencyBRL(totalPeriodo + val);
+
+    const eff = computeExpenseEffectiveStatus(exp, todayGoiasIso);
+    if (eff === 'pago') {
+      totalPago = roundCurrencyBRL(totalPago + val);
+    } else if (eff === 'atrasado') {
+      totalPendente = roundCurrencyBRL(totalPendente + val);
+      totalAtrasado = roundCurrencyBRL(totalAtrasado + val);
+      countAtrasado += 1;
+    } else {
+      totalPendente = roundCurrencyBRL(totalPendente + val);
+    }
+
+    const cur = catTotals.get(exp.categoria) || { amount: 0, count: 0 };
+    catTotals.set(exp.categoria, {
+      amount: roundCurrencyBRL(cur.amount + val),
+      count: cur.count + 1,
+    });
+  }
+
+  const byCategory = EXPENSE_CATEGORIES.map((cat) => {
+    const stats = catTotals.get(cat.key) || { amount: 0, count: 0 };
+    return {
+      key: cat.key,
+      label: cat.label,
+      colorHex: cat.colorHex,
+      amount: stats.amount,
+      count: stats.count,
+      percentage:
+        totalPeriodo > 0 ? Math.round((stats.amount / totalPeriodo) * 1000) / 10 : 0,
+    };
+  })
+    .filter((c) => c.count > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  return {
+    totalPeriodo,
+    totalPago,
+    totalPendente,
+    totalAtrasado,
+    countAtrasado,
+    countAtivos,
+    topCategory: byCategory[0]
+      ? {
+          key: byCategory[0].key,
+          label: byCategory[0].label,
+          colorHex: byCategory[0].colorHex,
+          amount: byCategory[0].amount,
+          percentage: byCategory[0].percentage,
+        }
+      : null,
+    byCategory,
+  };
+}
+
+export function buildExpensesCsvContent(
+  expenses: ExpenseRecord[],
+  todayGoiasIso: string = getTodayGoiasISO()
+): string {
+  const esc = (raw: string | undefined | null) => {
+    const s = String(raw ?? '').replace(/"/g, '""');
+    return `"${s}"`;
+  };
+  const header = [
+    'Data Competência',
+    'Categoria',
+    'Descrição',
+    'Fornecedor',
+    'Valor (R$)',
+    'Forma de Pagamento',
+    'Status',
+    'Vencimento',
+    'Pagamento',
+    'Observação',
+  ].join(';');
+
+  const rows = expenses.map((exp) => {
+    const eff = computeExpenseEffectiveStatus(exp, todayGoiasIso);
+    const catLabel = EXPENSE_CATEGORY_MAP[exp.categoria]?.label || exp.categoria;
+    const payLabel = EXPENSE_PAYMENT_META[exp.forma_pagamento]?.label || exp.forma_pagamento;
+    const statusLabel = EXPENSE_STATUS_META[eff]?.label || eff;
+    return [
+      esc(formatDateBR(exp.data_competencia)),
+      esc(catLabel),
+      esc(exp.descricao),
+      esc(exp.fornecedor || ''),
+      esc(formatDecimalBR(exp.valor)),
+      esc(payLabel),
+      esc(statusLabel),
+      esc(exp.data_vencimento ? formatDateBR(exp.data_vencimento) : ''),
+      esc(exp.data_pagamento ? formatDateBR(exp.data_pagamento) : ''),
+      esc(exp.observacao || ''),
+    ].join(';');
+  });
+
+  return '\uFEFF' + [header, ...rows].join('\r\n');
 }
 
 export function nowTimestampBR(date: Date = new Date()): string {
