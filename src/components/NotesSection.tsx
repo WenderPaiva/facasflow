@@ -475,15 +475,15 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
 
   const previewNote = notas.find((n) => n.id === previewNoteId) || null;
   const inputClass =
-    'liquid-glass-pill w-full px-3.5 py-2.5 text-xs rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
+    'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0">
       {/* LIST VIEW */}
       {viewMode === 'list' && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
                 Notas e Canhotos Digitais
               </h2>
@@ -495,15 +495,110 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
             <button
               type="button"
               onClick={openNewForm}
-              className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs rounded-full px-5 py-2.5 inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30 border border-white/40 cursor-pointer"
+              className="min-h-[44px] bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs sm:text-sm rounded-full px-5 py-2.5 inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30 border border-white/40 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Nova Nota</span>
             </button>
           </div>
 
-          <div className="liquid-glass rounded-[28px] overflow-hidden">
-            <div className="overflow-x-auto">
+          <div className="liquid-glass rounded-[28px] overflow-hidden min-w-0">
+            {/* Mobile Labeled Cards (< 768px) */}
+            <div className="md:hidden divide-y divide-white/55">
+              {filteredNotas.length === 0 ? (
+                <div className="py-10 px-4 text-center font-medium text-xs text-slate-600">
+                  Nenhuma nota emitida ainda. Clique em Nova Nota para criar o primeiro canhoto.
+                </div>
+              ) : (
+                filteredNotas.map((note) => {
+                  const stMeta = NOTE_STATUS_META[note.status];
+                  return (
+                    <div key={note.id} className="p-4 space-y-2.5 text-xs min-w-0">
+                      <div className="flex items-start justify-between gap-2 min-w-0">
+                        <div className="min-w-0">
+                          <span className="font-mono font-extrabold text-indigo-700 block">
+                            Nº {String(note.numero).padStart(4, '0')}
+                          </span>
+                          <span className="font-bold text-slate-900 break-words">
+                            {note.clienteNome}
+                          </span>
+                        </div>
+                        <span className="font-mono font-black text-base text-slate-900 shrink-0">
+                          {formatBRL(note.total)}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-slate-500 font-semibold block">Data</span>
+                          <span className="font-mono text-slate-800">
+                            {formatDateBR(note.data)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 font-semibold block">Status</span>
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${stMeta.badgeClass}`}
+                          >
+                            {stMeta.label}
+                          </span>
+                        </div>
+                        {note.cnpj && (
+                          <div className="col-span-2">
+                            <span className="text-slate-500 font-semibold block">CNPJ</span>
+                            <span className="font-mono text-slate-700">{note.cnpj}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewNoteId(note.id);
+                            setViewMode('preview');
+                          }}
+                          className="liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Eye className="w-4 h-4 text-indigo-600" />
+                          <span>Visualizar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditForm(note)}
+                          className="liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Edit3 className="w-4 h-4 text-indigo-600" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onMarkNotePrinted(note.id);
+                            onTriggerPrint(note, false);
+                          }}
+                          className="min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Printer className="w-4 h-4" />
+                          <span>Imprimir</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteNote(note.id)}
+                          aria-label="Excluir nota"
+                          className="min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center cursor-pointer"
+                          title="Excluir nota"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wider text-slate-600 border-b border-white/60 bg-white/30">

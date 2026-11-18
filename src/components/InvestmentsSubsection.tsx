@@ -75,7 +75,7 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
   };
 
   const inputClass =
-    'liquid-glass-pill w-full px-3.5 py-2.5 text-xs rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
+    'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
   return (
     <div className="space-y-5">
