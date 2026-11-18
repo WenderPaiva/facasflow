@@ -51,7 +51,12 @@ const server = http.createServer((req, res) => {
   // CORS headers for REST adapter compatibility
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, apikey, X-FacasFlow-Role, X-FacasFlow-Email, X-FacasFlow-Client-Id'
+  );
+  res.setHeader('Access-Control-Expose-Headers', 'X-FacasFlow-Server');
+  res.setHeader('X-FacasFlow-Server', 'true');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -67,16 +72,106 @@ const server = http.createServer((req, res) => {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
     });
-    res.write('\n');
+    res.write(': connected\n\n');
 
     if (!sseClientsByCompany.has(rawCompanyId)) {
       sseClientsByCompany.set(rawCompanyId, new Set());
     }
     sseClientsByCompany.get(rawCompanyId).add(res);
 
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(': keepalive\n\n');
+      } catch {
+        clearInterval(keepAlive);
+      }
+    }, 25000);
+
     req.on('close', () => {
+      clearInterval(keepAlive);
       const set = sseClientsByCompany.get(rawCompanyId);
       if (set) set.delete(res);
+    });
+    return;
+  }
+
+  // Cross-browser / LAN Employee Authentication Endpoint
+  if (pathname === '/api/auth/login' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const parsedBody = JSON.parse(body || '{}');
+        const email = String(parsedBody.email || '').trim().toLowerCase();
+        const password = String(parsedBody.password || '').trim();
+        if (!email || !password) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'E-mail e senha são obrigatórios.' }));
+          return;
+        }
+
+        const files = fs
+          .readdirSync(DATA_DIR)
+          .filter((f) => f.startsWith('facasflow-db-') && f.endsWith('.json'));
+
+        let matchedEmp = null;
+        let matchedCompanyId = '';
+
+        for (const file of files) {
+          try {
+            const rawDb = fs.readFileSync(path.join(DATA_DIR, file), 'utf8');
+            const tenantDb = JSON.parse(rawDb);
+            if (!Array.isArray(tenantDb.employees)) continue;
+            const found = tenantDb.employees.find(
+              (e) => String(e.email || '').trim().toLowerCase() === email
+            );
+            if (found) {
+              matchedEmp = found;
+              matchedCompanyId = found.company_id || tenantDb.company_id || 'tenant_qualifacas';
+              break;
+            }
+          } catch {
+            // skip corrupt file
+          }
+        }
+
+        if (!matchedEmp) {
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'User not found on disk' }));
+          return;
+        }
+
+        const storedPass = String(matchedEmp.password || '').trim();
+        const okPass =
+          storedPass === password || storedPass.toLowerCase() === password.toLowerCase();
+        if (!okPass) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(
+            JSON.stringify({
+              error: 'E-mail ou senha inválidos. Verifique suas credenciais.',
+            })
+          );
+          return;
+        }
+
+        const session = {
+          userId: matchedEmp.id,
+          company_id: matchedCompanyId,
+          companyName: matchedEmp.companyName || 'Facaria',
+          ownerName: matchedEmp.ownerName || matchedEmp.companyName || email,
+          email,
+          role: matchedEmp.role === 'operador' ? 'operador' : 'admin',
+          jobTitle: matchedEmp.jobTitle || '',
+          loggedInAt: new Date().toISOString(),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ session }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
     });
     return;
   }
@@ -250,7 +345,7 @@ const server = http.createServer((req, res) => {
     });
     req.on('end', () => {
       try {
-        const { orderId, stage, stageUpdatedAt } = JSON.parse(body);
+        const { orderId, stage, stageUpdatedAt, orderSnapshot } = JSON.parse(body);
         if (!orderId || !stage) {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ error: 'orderId and stage required' }));
@@ -258,10 +353,10 @@ const server = http.createServer((req, res) => {
         }
         const existing = fs.existsSync(tenantDbFile)
           ? JSON.parse(fs.readFileSync(tenantDbFile, 'utf8'))
-          : { company_id: rawCompanyId, orders: [] };
+          : { company_id: rawCompanyId, companies: [], orders: [] };
         let movedOrder = null;
         const nowIso = new Date().toISOString();
-        const nextOrders = (existing.orders || []).map((o) => {
+        let nextOrders = (existing.orders || []).map((o) => {
           if (o.id !== orderId) return o;
           const nextVer = (Number(o.version) || 1) + 1;
           movedOrder = {
@@ -277,6 +372,24 @@ const server = http.createServer((req, res) => {
           };
           return movedOrder;
         });
+
+        // Recover gracefully if the card was created offline/locally or disk lacked the snapshot
+        if (!movedOrder && orderSnapshot && orderSnapshot.id === orderId) {
+          const nextVer = Math.max(Number(orderSnapshot.version) || 1, 1) + 1;
+          movedOrder = {
+            ...orderSnapshot,
+            company_id: rawCompanyId,
+            stage,
+            stageUpdatedAt: stageUpdatedAt || orderSnapshot.stageUpdatedAt,
+            stageHistory: [
+              ...(Array.isArray(orderSnapshot.stageHistory) ? orderSnapshot.stageHistory : []),
+              { stage, timestamp: stageUpdatedAt || nowIso },
+            ],
+            version: nextVer,
+            updatedAt: nowIso,
+          };
+          nextOrders = [movedOrder, ...nextOrders];
+        }
 
         if (!movedOrder) {
           res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });

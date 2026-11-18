@@ -53,7 +53,9 @@ export function isSupabaseCloudActive(): boolean {
 }
 
 /**
- * Call Postgres RPC mover_faca(p_id, p_etapa, p_stage_updated_at) when Supabase is connected.
+ * Call Postgres RPC mover_faca(p_id, p_etapa, p_stage_updated_at) when Supabase is connected
+ * and migrations/Auth are deployed. Gracefully returns null if schema/RPC is not yet deployed
+ * so Broadcast + server sync still succeeds cleanly without breaking card moves.
  */
 export async function moveOrderStageViaRpc(
   orderId: string,
@@ -61,15 +63,44 @@ export async function moveOrderStageViaRpc(
   stageUpdatedAt: string
 ): Promise<{ version?: number; updated_at?: string } | null> {
   if (!activeSupabaseClient) return null;
-  const { data, error } = await activeSupabaseClient.rpc('mover_faca', {
-    p_id: orderId,
-    p_etapa: targetStage,
-    p_stage_updated_at: stageUpdatedAt,
-  });
-  if (error) {
-    throw error;
+  try {
+    const { data, error } = await activeSupabaseClient.rpc('mover_faca', {
+      p_id: orderId,
+      p_etapa: targetStage,
+      p_stage_updated_at: stageUpdatedAt,
+    });
+    if (error) {
+      const code = String(error.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      const isMissingSetup =
+        code === 'PGRST202' ||
+        code === 'PGRST205' ||
+        code === 'PGRST301' ||
+        code === '42883' ||
+        code === '42P01' ||
+        msg.includes('could not find') ||
+        msg.includes('does not exist') ||
+        msg.includes('não encontrada') ||
+        msg.includes('sem permissão') ||
+        msg.includes('permission denied') ||
+        msg.includes('jwt');
+      if (isMissingSetup) {
+        return null;
+      }
+      throw error;
+    }
+    return data || null;
+  } catch (err: any) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (
+      msg.includes('could not find') ||
+      msg.includes('does not exist') ||
+      msg.includes('404')
+    ) {
+      return null;
+    }
+    throw err;
   }
-  return data || null;
 }
 
 /**
@@ -158,10 +189,12 @@ export function publishRealtimeUpdate(params: {
 export function subscribeToCompanyRealtime(
   company_id: string,
   onRemoteUpdate: (event: RealtimeSyncEvent) => void,
-  onConnectionStatusChange?: (status: 'connected' | 'supabase_live' | 'reconnecting') => void
+  onConnectionStatusChange?: (status: 'connected' | 'supabase_live' | 'reconnecting') => void,
+  getLocalSnapshotForPeer?: () => EnterpriseDatabase | null
 ): () => void {
   let isDisposed = false;
   const seenEvents = new Set<string>();
+  const repliedRequesters = new Set<string>();
   let localBroadcast: BroadcastChannel | null = null;
   let localSupabaseClient: any = null;
   let localSupabaseChannel: any = null;
@@ -219,17 +252,27 @@ export function subscribeToCompanyRealtime(
   };
   window.addEventListener('storage', storageHandler);
 
-  // 3. Server-Sent Events (SSE) for localhost server.cjs
+  // 3. Server-Sent Events (SSE) for localhost / LAN server.cjs
   let sseSource: EventSource | null = null;
-  if (
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  const canUseSse =
     typeof EventSource !== 'undefined' &&
-    (window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1')
-  ) {
+    Boolean(host) &&
+    !host.endsWith('github.io') &&
+    (host === 'localhost' ||
+      host === '127.0.0.1' ||
+      /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ||
+      Boolean(window.location.port));
+  if (canUseSse) {
     try {
       sseSource = new EventSource(
         `/api/realtime?company_id=${encodeURIComponent(company_id)}`
       );
+      sseSource.onopen = () => {
+        if (!isDisposed) {
+          onConnectionStatusChange?.('connected');
+        }
+      };
       sseSource.onmessage = (evt) => {
         try {
           handleIncoming(JSON.parse(evt.data));
@@ -272,6 +315,42 @@ export function subscribeToCompanyRealtime(
           .on('broadcast', { event: 'facasflow_sync' }, (payload: any) => {
             if (payload?.payload) {
               handleIncoming(payload.payload);
+            }
+          })
+          .on('broadcast', { event: 'facasflow_sync_request' }, (payload: any) => {
+            if (isDisposed || !getLocalSnapshotForPeer) return;
+            const req = payload?.payload;
+            const requesterId = req?.requesterId;
+            if (
+              !requesterId ||
+              requesterId === CLIENT_INSTANCE_ID ||
+              req?.company_id !== company_id ||
+              repliedRequesters.has(requesterId)
+            ) {
+              return;
+            }
+            repliedRequesters.add(requesterId);
+            if (repliedRequesters.size > 50) {
+              const first = repliedRequesters.values().next().value;
+              if (first) repliedRequesters.delete(first);
+            }
+            const snap = getLocalSnapshotForPeer();
+            if (snap && Array.isArray(snap.orders) && snap.orders.length > 0) {
+              channel.send({
+                type: 'broadcast',
+                event: 'facasflow_sync',
+                payload: {
+                  eventId: `peer_sync_${CLIENT_INSTANCE_ID}_${requesterId}`,
+                  senderInstanceId: CLIENT_INSTANCE_ID,
+                  company_id,
+                  section: 'all',
+                  actionLabel: '',
+                  actorName: '',
+                  actorRole: 'admin',
+                  timestamp: new Date().toISOString(),
+                  db: snap,
+                } as RealtimeSyncEvent,
+              });
             }
           })
           .on(
@@ -319,6 +398,14 @@ export function subscribeToCompanyRealtime(
           .subscribe((status: string) => {
             if (status === 'SUBSCRIBED' && !isDisposed) {
               onConnectionStatusChange?.('supabase_live');
+              channel.send({
+                type: 'broadcast',
+                event: 'facasflow_sync_request',
+                payload: {
+                  requesterId: CLIENT_INSTANCE_ID,
+                  company_id,
+                },
+              });
             }
           });
 

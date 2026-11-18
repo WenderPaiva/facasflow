@@ -584,6 +584,8 @@ exports.clearActiveSession = clearActiveSession;
 exports.authenticateTenant = authenticateTenant;
 exports.registerNewTenant = registerNewTenant;
 exports.loadEnterpriseDatabase = loadEnterpriseDatabase;
+exports.fetchEnterpriseDatabaseFromServer = fetchEnterpriseDatabaseFromServer;
+exports.authenticateTenantWithServerFallback = authenticateTenantWithServerFallback;
 exports.saveEnterpriseDatabaseLocalOnly = saveEnterpriseDatabaseLocalOnly;
 exports.saveEnterpriseDatabase = saveEnterpriseDatabase;
 exports.moveOrderStageOnServer = moveOrderStageOnServer;
@@ -1099,7 +1101,12 @@ function loadEnterpriseDatabase(company_id = 'tenant_qualifacas') {
                 const legacyParsed = JSON.parse(legacyRaw);
                 if (legacyParsed && Array.isArray(legacyParsed.orders)) {
                     const migrated = normalizeDb(legacyParsed, company_id);
-                    saveEnterpriseDatabase(migrated);
+                    if (migrated.orders.length > 0) {
+                        saveEnterpriseDatabase(migrated);
+                    }
+                    else {
+                        saveEnterpriseDatabaseLocalOnly(migrated);
+                    }
                     return migrated;
                 }
             }
@@ -1109,8 +1116,80 @@ function loadEnterpriseDatabase(company_id = 'tenant_qualifacas') {
         // Fallback to empty isolated tenant database
     }
     const emptyDb = normalizeDb((0, seedOrders_1.createEnterpriseSeedDatabase)(company_id), company_id);
-    saveEnterpriseDatabase(emptyDb);
-    return emptyDb;
+    // IMPORTANT: Never PUT an empty seed to the server on first boot / empty tab!
+    return saveEnterpriseDatabaseLocalOnly(emptyDb);
+}
+/**
+ * Fetch latest authoritative database snapshot from server.cjs (when running behind FacasFlow HTTP server).
+ */
+async function fetchEnterpriseDatabaseFromServer(company_id) {
+    if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
+        return null;
+    }
+    try {
+        const active = getActiveSession();
+        const res = await fetch(`/api/orders?company_id=${encodeURIComponent(company_id)}`, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: {
+                'X-FacasFlow-Role': active?.role || 'admin',
+                'X-FacasFlow-Email': active?.email || '',
+                'X-FacasFlow-Client-Id': realtimeEngine_1.CLIENT_INSTANCE_ID,
+            },
+        });
+        if (!res.ok)
+            return null;
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json'))
+            return null;
+        const parsed = (await res.json());
+        if (!parsed || !Array.isArray(parsed.orders))
+            return null;
+        return normalizeDb(parsed, company_id);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Cross-browser / LAN authentication backed by server.cjs disk registry with local fallback.
+ */
+async function authenticateTenantWithServerFallback(emailInput, passwordInput) {
+    const email = emailInput.trim().toLowerCase();
+    const password = passwordInput.trim();
+    if (!email || !password) {
+        return { error: 'Preencha seu e-mail e senha para entrar.' };
+    }
+    if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+            const isFacasServer = res.headers.get('X-FacasFlow-Server') === 'true';
+            if (isFacasServer) {
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data?.session) {
+                        saveActiveSession(data.session);
+                        return { session: data.session };
+                    }
+                }
+                else if (res.status === 401 || res.status === 400) {
+                    const errData = await res.json().catch(() => ({}));
+                    return {
+                        error: errData?.error ||
+                            'E-mail ou senha inválidos. Verifique suas credenciais.',
+                    };
+                }
+            }
+        }
+        catch {
+            // Static hosting or offline: fall back to localStorage auth
+        }
+    }
+    return authenticateTenant(email, password);
 }
 /**
  * Update ONLY the local browser cache (never triggers HTTP PUT or SSE broadcast).
@@ -1169,10 +1248,20 @@ async function moveOrderStageOnServer(params) {
             orderId: params.orderId,
             stage: params.targetStage,
             stageUpdatedAt: params.stageUpdatedAt,
+            orderSnapshot: params.orderSnapshot,
         }),
     });
+    const isFacasServer = res.headers.get('X-FacasFlow-Server') === 'true';
     if (!res.ok) {
+        // On static hosts (e.g. GitHub Pages) there is no /api/orders/move backend
+        if (!isFacasServer && (res.status === 404 || res.status === 405)) {
+            return null;
+        }
         throw new Error(`Move stage failed with HTTP ${res.status}`);
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        return null;
     }
     const data = await res.json();
     return data?.order || null;
@@ -1302,20 +1391,49 @@ function isSupabaseCloudActive() {
     return Boolean(activeSupabaseClient && activeSupabaseChannel);
 }
 /**
- * Call Postgres RPC mover_faca(p_id, p_etapa, p_stage_updated_at) when Supabase is connected.
+ * Call Postgres RPC mover_faca(p_id, p_etapa, p_stage_updated_at) when Supabase is connected
+ * and migrations/Auth are deployed. Gracefully returns null if schema/RPC is not yet deployed
+ * so Broadcast + server sync still succeeds cleanly without breaking card moves.
  */
 async function moveOrderStageViaRpc(orderId, targetStage, stageUpdatedAt) {
     if (!activeSupabaseClient)
         return null;
-    const { data, error } = await activeSupabaseClient.rpc('mover_faca', {
-        p_id: orderId,
-        p_etapa: targetStage,
-        p_stage_updated_at: stageUpdatedAt,
-    });
-    if (error) {
-        throw error;
+    try {
+        const { data, error } = await activeSupabaseClient.rpc('mover_faca', {
+            p_id: orderId,
+            p_etapa: targetStage,
+            p_stage_updated_at: stageUpdatedAt,
+        });
+        if (error) {
+            const code = String(error.code || '');
+            const msg = String(error.message || '').toLowerCase();
+            const isMissingSetup = code === 'PGRST202' ||
+                code === 'PGRST205' ||
+                code === 'PGRST301' ||
+                code === '42883' ||
+                code === '42P01' ||
+                msg.includes('could not find') ||
+                msg.includes('does not exist') ||
+                msg.includes('não encontrada') ||
+                msg.includes('sem permissão') ||
+                msg.includes('permission denied') ||
+                msg.includes('jwt');
+            if (isMissingSetup) {
+                return null;
+            }
+            throw error;
+        }
+        return data || null;
     }
-    return data || null;
+    catch (err) {
+        const msg = String(err?.message || '').toLowerCase();
+        if (msg.includes('could not find') ||
+            msg.includes('does not exist') ||
+            msg.includes('404')) {
+            return null;
+        }
+        throw err;
+    }
 }
 /**
  * Publish a real-time update across BroadcastChannel, localStorage event, and Supabase Broadcast.
@@ -1386,9 +1504,10 @@ function publishRealtimeUpdate(params) {
  * Subscribe to real-time updates for a specific `company_id`.
  * Strictly read-only listener: updates local UI state only, never writes back to DB.
  */
-function subscribeToCompanyRealtime(company_id, onRemoteUpdate, onConnectionStatusChange) {
+function subscribeToCompanyRealtime(company_id, onRemoteUpdate, onConnectionStatusChange, getLocalSnapshotForPeer) {
     let isDisposed = false;
     const seenEvents = new Set();
+    const repliedRequesters = new Set();
     let localBroadcast = null;
     let localSupabaseClient = null;
     let localSupabaseChannel = null;
@@ -1447,13 +1566,24 @@ function subscribeToCompanyRealtime(company_id, onRemoteUpdate, onConnectionStat
         }
     };
     window.addEventListener('storage', storageHandler);
-    // 3. Server-Sent Events (SSE) for localhost server.cjs
+    // 3. Server-Sent Events (SSE) for localhost / LAN server.cjs
     let sseSource = null;
-    if (typeof EventSource !== 'undefined' &&
-        (window.location.hostname === 'localhost' ||
-            window.location.hostname === '127.0.0.1')) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    const canUseSse = typeof EventSource !== 'undefined' &&
+        Boolean(host) &&
+        !host.endsWith('github.io') &&
+        (host === 'localhost' ||
+            host === '127.0.0.1' ||
+            /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ||
+            Boolean(window.location.port));
+    if (canUseSse) {
         try {
             sseSource = new EventSource(`/api/realtime?company_id=${encodeURIComponent(company_id)}`);
+            sseSource.onopen = () => {
+                if (!isDisposed) {
+                    onConnectionStatusChange?.('connected');
+                }
+            };
             sseSource.onmessage = (evt) => {
                 try {
                     handleIncoming(JSON.parse(evt.data));
@@ -1499,6 +1629,42 @@ function subscribeToCompanyRealtime(company_id, onRemoteUpdate, onConnectionStat
                     handleIncoming(payload.payload);
                 }
             })
+                .on('broadcast', { event: 'facasflow_sync_request' }, (payload) => {
+                if (isDisposed || !getLocalSnapshotForPeer)
+                    return;
+                const req = payload?.payload;
+                const requesterId = req?.requesterId;
+                if (!requesterId ||
+                    requesterId === exports.CLIENT_INSTANCE_ID ||
+                    req?.company_id !== company_id ||
+                    repliedRequesters.has(requesterId)) {
+                    return;
+                }
+                repliedRequesters.add(requesterId);
+                if (repliedRequesters.size > 50) {
+                    const first = repliedRequesters.values().next().value;
+                    if (first)
+                        repliedRequesters.delete(first);
+                }
+                const snap = getLocalSnapshotForPeer();
+                if (snap && Array.isArray(snap.orders) && snap.orders.length > 0) {
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'facasflow_sync',
+                        payload: {
+                            eventId: `peer_sync_${exports.CLIENT_INSTANCE_ID}_${requesterId}`,
+                            senderInstanceId: exports.CLIENT_INSTANCE_ID,
+                            company_id,
+                            section: 'all',
+                            actionLabel: '',
+                            actorName: '',
+                            actorRole: 'admin',
+                            timestamp: new Date().toISOString(),
+                            db: snap,
+                        },
+                    });
+                }
+            })
                 .on('postgres_changes', {
                 event: 'UPDATE',
                 schema: 'public',
@@ -1540,6 +1706,14 @@ function subscribeToCompanyRealtime(company_id, onRemoteUpdate, onConnectionStat
                 .subscribe((status) => {
                 if (status === 'SUBSCRIBED' && !isDisposed) {
                     onConnectionStatusChange?.('supabase_live');
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'facasflow_sync_request',
+                        payload: {
+                            requesterId: exports.CLIENT_INSTANCE_ID,
+                            company_id,
+                        },
+                    });
                 }
             });
             if (isDisposed) {
@@ -1651,17 +1825,26 @@ const AuthLoginScreen = ({ onAuthenticated, }) => {
     const [regEmail, setRegEmail] = (0, react_1.useState)('');
     const [regPassword, setRegPassword] = (0, react_1.useState)('');
     const [errorMsg, setErrorMsg] = (0, react_1.useState)(null);
-    const handleLoginSubmit = (e) => {
+    const [isLoggingIn, setIsLoggingIn] = (0, react_1.useState)(false);
+    const handleLoginSubmit = async (e) => {
         e.preventDefault();
-        setErrorMsg(null);
-        const normalizedEmail = email.trim().toLowerCase();
-        const normalizedPassword = password.trim();
-        const res = (0, storageAdapter_1.authenticateTenant)(normalizedEmail, normalizedPassword);
-        if (res.error || !res.session) {
-            setErrorMsg(res.error || 'Falha na autenticação.');
+        if (isLoggingIn)
             return;
+        setErrorMsg(null);
+        setIsLoggingIn(true);
+        try {
+            const normalizedEmail = email.trim().toLowerCase();
+            const normalizedPassword = password.trim();
+            const res = await (0, storageAdapter_1.authenticateTenantWithServerFallback)(normalizedEmail, normalizedPassword);
+            if (res.error || !res.session) {
+                setErrorMsg(res.error || 'Falha na autenticação.');
+                return;
+            }
+            onAuthenticated(res.session);
         }
-        onAuthenticated(res.session);
+        finally {
+            setIsLoggingIn(false);
+        }
     };
     const handleRegisterSubmit = (e) => {
         e.preventDefault();
@@ -5073,6 +5256,8 @@ const App = () => {
     const [printJob, setPrintJob] = (0, react_1.useState)(null);
     const [pendingOrderIds, setPendingOrderIds] = (0, react_1.useState)([]);
     const pendingOrderIdsRef = (0, react_1.useRef)(new Set());
+    const dbRef = (0, react_1.useRef)(db);
+    dbRef.current = db;
     const [moveError, setMoveError] = (0, react_1.useState)(null);
     const [toast, setToast] = (0, react_1.useState)(null);
     const showToast = (message) => {
@@ -5092,12 +5277,54 @@ const App = () => {
             return false;
         return (incoming.updatedAt || '') > (local.updatedAt || '');
     };
-    // Subscribe to Realtime updates for the logged-in company_id (Read-only state merge; never writes back)
+    // Subscribe to Realtime updates & hydrate from server for the logged-in company_id (never writes back)
     (0, react_1.useEffect)(() => {
         window.__facasflowChannelCount = realtimeEngine_1.getActiveRealtimeChannelCount;
         if (!session?.company_id)
             return;
-        const unsubscribe = (0, realtimeEngine_1.subscribeToCompanyRealtime)(session.company_id, (remoteEvent) => {
+        let isCancelled = false;
+        const activeCompanyId = session.company_id;
+        (0, storageAdapter_1.fetchEnterpriseDatabaseFromServer)(activeCompanyId).then((serverDb) => {
+            if (isCancelled || !serverDb)
+                return;
+            const serverHasRecord = serverDb.orders.length > 0 ||
+                serverDb.companies.length > 0 ||
+                (serverDb.employees?.length || 0) > 0 ||
+                serverDb.deliveries.length > 0;
+            if (!serverHasRecord)
+                return;
+            setDb((prev) => {
+                const localOrderMap = new Map(prev.orders.map((o) => [o.id, o]));
+                const mergedOrders = serverDb.orders.map((srv) => {
+                    const loc = localOrderMap.get(srv.id);
+                    if (loc && pendingOrderIdsRef.current.has(srv.id)) {
+                        return loc;
+                    }
+                    if (loc && !isNewerOrder(srv, loc)) {
+                        return loc;
+                    }
+                    return srv;
+                });
+                const serverIds = new Set(mergedOrders.map((o) => o.id));
+                for (const loc of prev.orders) {
+                    if (!serverIds.has(loc.id) && pendingOrderIdsRef.current.has(loc.id)) {
+                        mergedOrders.unshift(loc);
+                    }
+                }
+                return (0, storageAdapter_1.saveEnterpriseDatabaseLocalOnly)({
+                    ...prev,
+                    ...serverDb,
+                    company_id: activeCompanyId,
+                    companies: serverDb.companies.length > 0 ? serverDb.companies : prev.companies,
+                    orders: mergedOrders,
+                    employees: serverDb.employees && serverDb.employees.length > 0
+                        ? serverDb.employees
+                        : prev.employees,
+                });
+            });
+            setEmployees((0, storageAdapter_1.getCompanyEmployees)(activeCompanyId));
+        });
+        const unsubscribe = (0, realtimeEngine_1.subscribeToCompanyRealtime)(activeCompanyId, (remoteEvent) => {
             setDb((prev) => {
                 let nextDb = prev;
                 if (remoteEvent.order) {
@@ -5130,18 +5357,26 @@ const App = () => {
                         return inc;
                     });
                     nextDb = (0, storageAdapter_1.saveEnterpriseDatabaseLocalOnly)({
+                        ...prev,
                         ...remoteEvent.db,
-                        company_id: session.company_id,
+                        company_id: activeCompanyId,
+                        companies: remoteEvent.db.companies?.length > 0
+                            ? remoteEvent.db.companies
+                            : prev.companies,
                         orders: mergedOrders,
+                        employees: remoteEvent.db.employees && remoteEvent.db.employees.length > 0
+                            ? remoteEvent.db.employees
+                            : prev.employees,
                     });
                 }
                 return nextDb;
             });
-            setEmployees((0, storageAdapter_1.getCompanyEmployees)(session.company_id));
+            setEmployees((0, storageAdapter_1.getCompanyEmployees)(activeCompanyId));
         }, (status) => {
             setRealtimeStatus(status);
-        });
+        }, () => dbRef.current);
         return () => {
+            isCancelled = true;
             unsubscribe();
         };
     }, [session?.company_id, realtimeConfigTick]);
@@ -5328,26 +5563,26 @@ const App = () => {
         }));
         try {
             let authoritativeOrder = optimisticOrder;
-            // 2. Escrita única via RPC (Supabase) ou endpoint atômico (server.cjs)
+            // 2. Persistência atômica no servidor local/LAN (com orderSnapshot de recuperação)
+            const serverOrder = await (0, storageAdapter_1.moveOrderStageOnServer)({
+                company_id: session.company_id,
+                orderId,
+                targetStage,
+                stageUpdatedAt: stamp,
+                orderSnapshot: optimisticOrder,
+            });
+            if (serverOrder) {
+                authoritativeOrder = serverOrder;
+            }
+            // 3. RPC Supabase quando schema/Auth estiverem ativos (fallback silencioso para Broadcast)
             if ((0, realtimeEngine_1.isSupabaseCloudActive)()) {
                 const rpcRow = await (0, realtimeEngine_1.moveOrderStageViaRpc)(orderId, targetStage, stamp);
                 if (rpcRow) {
                     authoritativeOrder = {
-                        ...optimisticOrder,
-                        version: rpcRow.version ?? optimisticOrder.version,
-                        updatedAt: rpcRow.updated_at ?? optimisticOrder.updatedAt,
+                        ...authoritativeOrder,
+                        version: rpcRow.version ?? authoritativeOrder.version,
+                        updatedAt: rpcRow.updated_at ?? authoritativeOrder.updatedAt,
                     };
-                }
-            }
-            else {
-                const serverOrder = await (0, storageAdapter_1.moveOrderStageOnServer)({
-                    company_id: session.company_id,
-                    orderId,
-                    targetStage,
-                    stageUpdatedAt: stamp,
-                });
-                if (serverOrder) {
-                    authoritativeOrder = serverOrder;
                 }
             }
             // 3. Limpar estado pendente e confirmar registro final
@@ -5381,6 +5616,7 @@ const App = () => {
     }, [db.orders, session]);
     const handleTogglePaid = (orderId) => {
         const today = (0, financeEngine_1.toISODate)();
+        const nowIso = new Date().toISOString();
         const nextOrders = db.orders.map((o) => {
             if (o.id !== orderId)
                 return o;
@@ -5389,6 +5625,8 @@ const App = () => {
                 ...o,
                 paymentStatus: (isPaid ? 'a_receber' : 'pago'),
                 paidAt: isPaid ? undefined : today,
+                version: (Number(o.version) || 1) + 1,
+                updatedAt: nowIso,
             };
         });
         commitDb({ ...db, orders: nextOrders }, {
@@ -5399,6 +5637,7 @@ const App = () => {
     };
     const handleEmitBilling30d = (orderId) => {
         const today = (0, financeEngine_1.toISODate)();
+        const nowIso = new Date().toISOString();
         const nextOrders = db.orders.map((o) => {
             if (o.id !== orderId)
                 return o;
@@ -5406,6 +5645,8 @@ const App = () => {
                 ...o,
                 paymentStatus: 'a_receber',
                 dueDate: (0, financeEngine_1.addDays)(today, 30),
+                version: (Number(o.version) || 1) + 1,
+                updatedAt: nowIso,
             };
         });
         commitDb({ ...db, orders: nextOrders }, {
@@ -5422,8 +5663,15 @@ const App = () => {
             ...deliveryData,
         };
         const stamp = (0, financeEngine_1.nowTimestampBR)();
+        const nowIso = new Date().toISOString();
         const nextOrders = db.orders.map((o) => o.id === deliveryData.orderId
-            ? { ...o, stage: 'faca_pronta', stageUpdatedAt: stamp }
+            ? {
+                ...o,
+                stage: 'faca_pronta',
+                stageUpdatedAt: stamp,
+                version: (Number(o.version) || 1) + 1,
+                updatedAt: nowIso,
+            }
             : o);
         commitDb({
             ...db,

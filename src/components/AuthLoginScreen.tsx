@@ -9,7 +9,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import {
-  authenticateTenant,
+  authenticateTenantWithServerFallback,
   registerNewTenant,
 } from '../services/storageAdapter';
 import { AuthSession } from '../types/order';
@@ -32,18 +32,28 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
   const [regPassword, setRegPassword] = useState('');
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoggingIn) return;
     setErrorMsg(null);
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedPassword = password.trim();
-    const res = authenticateTenant(normalizedEmail, normalizedPassword);
-    if (res.error || !res.session) {
-      setErrorMsg(res.error || 'Falha na autenticação.');
-      return;
+    setIsLoggingIn(true);
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedPassword = password.trim();
+      const res = await authenticateTenantWithServerFallback(
+        normalizedEmail,
+        normalizedPassword
+      );
+      if (res.error || !res.session) {
+        setErrorMsg(res.error || 'Falha na autenticação.');
+        return;
+      }
+      onAuthenticated(res.session);
+    } finally {
+      setIsLoggingIn(false);
     }
-    onAuthenticated(res.session);
   };
 
   const handleRegisterSubmit = (e: React.FormEvent) => {

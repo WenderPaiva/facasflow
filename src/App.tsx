@@ -26,6 +26,7 @@ import {
 import {
   clearActiveSession,
   deleteEmployeeFromCompany,
+  fetchEnterpriseDatabaseFromServer,
   getActiveSession,
   getCompanyEmployees,
   getNextDeliveryId,
@@ -115,6 +116,8 @@ export const App: React.FC = () => {
   } | null>(null);
   const [pendingOrderIds, setPendingOrderIds] = useState<string[]>([]);
   const pendingOrderIdsRef = useRef<Set<string>>(new Set());
+  const dbRef = useRef<EnterpriseDatabase>(db);
+  dbRef.current = db;
   const [moveError, setMoveError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     message: string;
@@ -136,13 +139,61 @@ export const App: React.FC = () => {
     return (incoming.updatedAt || '') > (local.updatedAt || '');
   };
 
-  // Subscribe to Realtime updates for the logged-in company_id (Read-only state merge; never writes back)
+  // Subscribe to Realtime updates & hydrate from server for the logged-in company_id (never writes back)
   useEffect(() => {
     (window as any).__facasflowChannelCount = getActiveRealtimeChannelCount;
     if (!session?.company_id) return;
 
+    let isCancelled = false;
+    const activeCompanyId = session.company_id;
+
+    fetchEnterpriseDatabaseFromServer(activeCompanyId).then((serverDb) => {
+      if (isCancelled || !serverDb) return;
+      const serverHasRecord =
+        serverDb.orders.length > 0 ||
+        serverDb.companies.length > 0 ||
+        (serverDb.employees?.length || 0) > 0 ||
+        serverDb.deliveries.length > 0;
+      if (!serverHasRecord) return;
+
+      setDb((prev) => {
+        const localOrderMap = new Map(prev.orders.map((o) => [o.id, o]));
+        const mergedOrders = serverDb.orders.map((srv) => {
+          const loc = localOrderMap.get(srv.id);
+          if (loc && pendingOrderIdsRef.current.has(srv.id)) {
+            return loc;
+          }
+          if (loc && !isNewerOrder(srv, loc)) {
+            return loc;
+          }
+          return srv;
+        });
+
+        const serverIds = new Set(mergedOrders.map((o) => o.id));
+        for (const loc of prev.orders) {
+          if (!serverIds.has(loc.id) && pendingOrderIdsRef.current.has(loc.id)) {
+            mergedOrders.unshift(loc);
+          }
+        }
+
+        return saveEnterpriseDatabaseLocalOnly({
+          ...prev,
+          ...serverDb,
+          company_id: activeCompanyId,
+          companies:
+            serverDb.companies.length > 0 ? serverDb.companies : prev.companies,
+          orders: mergedOrders,
+          employees:
+            serverDb.employees && serverDb.employees.length > 0
+              ? serverDb.employees
+              : prev.employees,
+        });
+      });
+      setEmployees(getCompanyEmployees(activeCompanyId));
+    });
+
     const unsubscribe = subscribeToCompanyRealtime(
-      session.company_id,
+      activeCompanyId,
       (remoteEvent) => {
         setDb((prev) => {
           let nextDb = prev;
@@ -177,21 +228,32 @@ export const App: React.FC = () => {
               return inc;
             });
             nextDb = saveEnterpriseDatabaseLocalOnly({
+              ...prev,
               ...remoteEvent.db,
-              company_id: session.company_id,
+              company_id: activeCompanyId,
+              companies:
+                remoteEvent.db.companies?.length > 0
+                  ? remoteEvent.db.companies
+                  : prev.companies,
               orders: mergedOrders,
+              employees:
+                remoteEvent.db.employees && remoteEvent.db.employees.length > 0
+                  ? remoteEvent.db.employees
+                  : prev.employees,
             });
           }
           return nextDb;
         });
-        setEmployees(getCompanyEmployees(session.company_id));
+        setEmployees(getCompanyEmployees(activeCompanyId));
       },
       (status) => {
         setRealtimeStatus(status);
-      }
+      },
+      () => dbRef.current
     );
 
     return () => {
+      isCancelled = true;
       unsubscribe();
     };
   }, [session?.company_id, realtimeConfigTick]);
@@ -435,25 +497,27 @@ export const App: React.FC = () => {
       try {
         let authoritativeOrder = optimisticOrder;
 
-        // 2. Escrita única via RPC (Supabase) ou endpoint atômico (server.cjs)
+        // 2. Persistência atômica no servidor local/LAN (com orderSnapshot de recuperação)
+        const serverOrder = await moveOrderStageOnServer({
+          company_id: session.company_id,
+          orderId,
+          targetStage,
+          stageUpdatedAt: stamp,
+          orderSnapshot: optimisticOrder,
+        });
+        if (serverOrder) {
+          authoritativeOrder = serverOrder;
+        }
+
+        // 3. RPC Supabase quando schema/Auth estiverem ativos (fallback silencioso para Broadcast)
         if (isSupabaseCloudActive()) {
           const rpcRow = await moveOrderStageViaRpc(orderId, targetStage, stamp);
           if (rpcRow) {
             authoritativeOrder = {
-              ...optimisticOrder,
-              version: rpcRow.version ?? optimisticOrder.version,
-              updatedAt: rpcRow.updated_at ?? optimisticOrder.updatedAt,
+              ...authoritativeOrder,
+              version: rpcRow.version ?? authoritativeOrder.version,
+              updatedAt: rpcRow.updated_at ?? authoritativeOrder.updatedAt,
             };
-          }
-        } else {
-          const serverOrder = await moveOrderStageOnServer({
-            company_id: session.company_id,
-            orderId,
-            targetStage,
-            stageUpdatedAt: stamp,
-          });
-          if (serverOrder) {
-            authoritativeOrder = serverOrder;
           }
         }
 
@@ -499,6 +563,7 @@ export const App: React.FC = () => {
 
   const handleTogglePaid = (orderId: string) => {
     const today = toISODate();
+    const nowIso = new Date().toISOString();
     const nextOrders = db.orders.map((o) => {
       if (o.id !== orderId) return o;
       const isPaid = o.paymentStatus === 'pago';
@@ -506,6 +571,8 @@ export const App: React.FC = () => {
         ...o,
         paymentStatus: (isPaid ? 'a_receber' : 'pago') as PaymentStatus,
         paidAt: isPaid ? undefined : today,
+        version: (Number(o.version) || 1) + 1,
+        updatedAt: nowIso,
       };
     });
     commitDb(
@@ -520,12 +587,15 @@ export const App: React.FC = () => {
 
   const handleEmitBilling30d = (orderId: string) => {
     const today = toISODate();
+    const nowIso = new Date().toISOString();
     const nextOrders = db.orders.map((o) => {
       if (o.id !== orderId) return o;
       return {
         ...o,
         paymentStatus: 'a_receber' as PaymentStatus,
         dueDate: addDays(today, 30),
+        version: (Number(o.version) || 1) + 1,
+        updatedAt: nowIso,
       };
     });
     commitDb(
@@ -546,9 +616,16 @@ export const App: React.FC = () => {
       ...deliveryData,
     };
     const stamp = nowTimestampBR();
+    const nowIso = new Date().toISOString();
     const nextOrders = db.orders.map((o) =>
       o.id === deliveryData.orderId
-        ? { ...o, stage: 'faca_pronta' as ProductionStage, stageUpdatedAt: stamp }
+        ? {
+            ...o,
+            stage: 'faca_pronta' as ProductionStage,
+            stageUpdatedAt: stamp,
+            version: (Number(o.version) || 1) + 1,
+            updatedAt: nowIso,
+          }
         : o
     );
     commitDb(

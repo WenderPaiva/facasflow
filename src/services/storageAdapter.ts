@@ -619,7 +619,11 @@ export function loadEnterpriseDatabase(
         const legacyParsed = JSON.parse(legacyRaw) as EnterpriseDatabase;
         if (legacyParsed && Array.isArray(legacyParsed.orders)) {
           const migrated = normalizeDb(legacyParsed, company_id);
-          saveEnterpriseDatabase(migrated);
+          if (migrated.orders.length > 0) {
+            saveEnterpriseDatabase(migrated);
+          } else {
+            saveEnterpriseDatabaseLocalOnly(migrated);
+          }
           return migrated;
         }
       }
@@ -632,8 +636,87 @@ export function loadEnterpriseDatabase(
     createEnterpriseSeedDatabase(company_id),
     company_id
   );
-  saveEnterpriseDatabase(emptyDb);
-  return emptyDb;
+  // IMPORTANT: Never PUT an empty seed to the server on first boot / empty tab!
+  return saveEnterpriseDatabaseLocalOnly(emptyDb);
+}
+
+/**
+ * Fetch latest authoritative database snapshot from server.cjs (when running behind FacasFlow HTTP server).
+ */
+export async function fetchEnterpriseDatabaseFromServer(
+  company_id: string
+): Promise<EnterpriseDatabase | null> {
+  if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
+    return null;
+  }
+  try {
+    const active = getActiveSession();
+    const res = await fetch(
+      `/api/orders?company_id=${encodeURIComponent(company_id)}`,
+      {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          'X-FacasFlow-Role': active?.role || 'admin',
+          'X-FacasFlow-Email': active?.email || '',
+          'X-FacasFlow-Client-Id': CLIENT_INSTANCE_ID,
+        },
+      }
+    );
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return null;
+    const parsed = (await res.json()) as EnterpriseDatabase;
+    if (!parsed || !Array.isArray(parsed.orders)) return null;
+    return normalizeDb(parsed, company_id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cross-browser / LAN authentication backed by server.cjs disk registry with local fallback.
+ */
+export async function authenticateTenantWithServerFallback(
+  emailInput: string,
+  passwordInput: string
+): Promise<{ session?: AuthSession; error?: string }> {
+  const email = emailInput.trim().toLowerCase();
+  const password = passwordInput.trim();
+  if (!email || !password) {
+    return { error: 'Preencha seu e-mail e senha para entrar.' };
+  }
+
+  if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const isFacasServer = res.headers.get('X-FacasFlow-Server') === 'true';
+      if (isFacasServer) {
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.session) {
+            saveActiveSession(data.session as AuthSession);
+            return { session: data.session as AuthSession };
+          }
+        } else if (res.status === 401 || res.status === 400) {
+          const errData = await res.json().catch(() => ({}));
+          return {
+            error:
+              errData?.error ||
+              'E-mail ou senha inválidos. Verifique suas credenciais.',
+          };
+        }
+      }
+    } catch {
+      // Static hosting or offline: fall back to localStorage auth
+    }
+  }
+
+  return authenticateTenant(email, password);
 }
 
 /**
@@ -689,6 +772,7 @@ export async function moveOrderStageOnServer(params: {
   orderId: string;
   targetStage: ProductionStage;
   stageUpdatedAt: string;
+  orderSnapshot?: DieOrder;
 }): Promise<DieOrder | null> {
   if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
     return null;
@@ -709,11 +793,21 @@ export async function moveOrderStageOnServer(params: {
         orderId: params.orderId,
         stage: params.targetStage,
         stageUpdatedAt: params.stageUpdatedAt,
+        orderSnapshot: params.orderSnapshot,
       }),
     }
   );
+  const isFacasServer = res.headers.get('X-FacasFlow-Server') === 'true';
   if (!res.ok) {
+    // On static hosts (e.g. GitHub Pages) there is no /api/orders/move backend
+    if (!isFacasServer && (res.status === 404 || res.status === 405)) {
+      return null;
+    }
     throw new Error(`Move stage failed with HTTP ${res.status}`);
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return null;
   }
   const data = await res.json();
   return data?.order || null;
