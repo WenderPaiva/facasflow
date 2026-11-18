@@ -1017,7 +1017,14 @@ async function signInWithSupabase(emailInput, passwordInput) {
         return { error: 'Preencha seu e-mail e senha para entrar.' };
     }
     const sb = (0, supabaseClient_1.getSupabaseClient)();
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    let { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error && String(error.message || '').toLowerCase().includes('email not confirmed')) {
+        const retryConfirm = await sb.auth.signUp({ email, password });
+        if (retryConfirm.data?.session && retryConfirm.data?.user) {
+            data = { user: retryConfirm.data.user, session: retryConfirm.data.session };
+            error = null;
+        }
+    }
     if (error || !data?.user) {
         const msg = String(error?.message || '').toLowerCase();
         if (msg.includes('email not confirmed')) {

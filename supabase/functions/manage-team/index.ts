@@ -91,11 +91,22 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: createdProfile } = await supabaseAdmin
+      const { data: createdProfile, error: profUpErr } = await supabaseAdmin
         .from("perfis")
-        .select("*")
+        .update({
+          empresa_id: empresaId,
+          nome: ownerName,
+          role,
+          cargo,
+          updated_by: caller.id,
+        })
         .eq("id", created.user.id)
+        .select("*")
         .maybeSingle();
+
+      if (profUpErr) {
+        return jsonResponse({ error: profUpErr.message }, 500);
+      }
 
       return jsonResponse({ member: createdProfile });
     }
