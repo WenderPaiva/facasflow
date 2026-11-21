@@ -14,9 +14,11 @@ import { FastEntryModal } from './components/FastEntryModal';
 import { FinanceAnalyticsSection } from './components/FinanceAnalyticsSection';
 import { HeaderBar, LiquidSidebar } from './components/HeaderBar';
 import {
-  CanhotoSlipCard,
   chunkNoteItems,
+  formatPedidoNumber,
   NotesSection,
+  PEDIDO_A5_ROWS,
+  PedidoA5Sheet,
 } from './components/NotesSection';
 import { ProductionKanban } from './components/ProductionKanban';
 import { SettingsBackupsSection } from './components/SettingsBackupsSection';
@@ -95,6 +97,7 @@ import {
   PaymentModality,
   PaymentStatus,
   PayrollEmployeeRecord,
+  PedidoEmitterProfile,
   ProductionStage,
   ReturnStatus,
   ServiceProviderRecord,
@@ -156,7 +159,7 @@ export const App: React.FC = () => {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [printJob, setPrintJob] = useState<{
     note: NoteRecord;
-    threePerPage: boolean;
+    emitter: PedidoEmitterProfile;
   } | null>(null);
 
   // Settings & Backups (Admin Only)
@@ -1149,8 +1152,8 @@ export const App: React.FC = () => {
   const handleSaveNote = async (
     payload: Omit<NoteRecord, 'id' | 'company_id' | 'criadoPor' | 'criadoEm'>,
     editingId?: string
-  ) => {
-    if (!session || session.role === 'cliente') return;
+  ): Promise<NoteRecord | null> => {
+    if (!session || session.role === 'cliente') return null;
     try {
       const saved = await dbSaveNote(
         empresaId,
@@ -1171,12 +1174,14 @@ export const App: React.FC = () => {
       });
       scheduleAutoBackup();
       showToast(
-        `Nota Nº ${String(saved.numero).padStart(4, '0')} ${
-          editingId ? 'atualizada' : 'emitida'
+        `Pedido Nº ${formatPedidoNumber(saved.numero)} ${
+          editingId ? 'atualizado' : 'emitido'
         }!`
       );
+      return saved;
     } catch (err: any) {
-      showToast(err?.message || 'Erro ao salvar nota.', 'err');
+      showToast(err?.message || 'Erro ao salvar pedido.', 'err');
+      return null;
     }
   };
 
@@ -1204,14 +1209,17 @@ export const App: React.FC = () => {
         notas: (prev.notas || []).filter((n) => n.id !== id),
       }));
       scheduleAutoBackup();
-      showToast('Nota removida!');
+      showToast('Pedido removido!');
     } catch (err: any) {
-      showToast(err?.message || 'Erro ao remover nota.', 'err');
+      showToast(err?.message || 'Erro ao remover pedido.', 'err');
     }
   };
 
-  const handleTriggerPrint = (note: NoteRecord, threePerPage: boolean) => {
-    setPrintJob({ note, threePerPage });
+  const handleTriggerPrint = (
+    note: NoteRecord,
+    emitter: PedidoEmitterProfile
+  ) => {
+    setPrintJob({ note, emitter });
     window.setTimeout(() => {
       window.print();
     }, 120);
@@ -1338,14 +1346,8 @@ export const App: React.FC = () => {
       ? 'esteira'
       : activeSection;
 
-  const printSlips = printJob
-    ? (() => {
-        const chunks = chunkNoteItems(printJob.note.items, 6);
-        if (printJob.threePerPage && chunks.length === 1) {
-          return [chunks[0], chunks[0], chunks[0]];
-        }
-        return chunks;
-      })()
+  const printPages = printJob
+    ? chunkNoteItems(printJob.note.items, PEDIDO_A5_ROWS)
     : [];
 
   return (
@@ -1549,13 +1551,14 @@ export const App: React.FC = () => {
                   companies={db.companies}
                   orders={db.orders}
                   nextNoteNumber={nextNoteNumber}
-                  tenantName={session.companyName}
+                  tenantKey={empresaId}
                   currentUserName={session.ownerName}
                   globalSearchQuery={searchQuery}
                   onSaveNote={handleSaveNote}
                   onMarkNotePrinted={handleMarkNotePrinted}
                   onDeleteNote={handleDeleteNote}
                   onTriggerPrint={handleTriggerPrint}
+                  onSyncPrintPreview={setPrintJob}
                 />
               )}
 
@@ -1651,22 +1654,17 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {/* Container exclusivo de impressão 1/3 A4 */}
+      {/* Container exclusivo de impressão A5 Retrato (148 x 210 mm) */}
       {printJob && (
         <div className="print-only-container">
-          {printSlips.map((chunk, idx) => (
-            <CanhotoSlipCard
+          {printPages.map((chunk, idx) => (
+            <PedidoA5Sheet
               key={`print-${printJob.note.id}-${idx}`}
               note={printJob.note}
               itemsChunk={chunk}
-              slipIndex={
-                printJob.threePerPage &&
-                chunkNoteItems(printJob.note.items, 6).length === 1
-                  ? 0
-                  : idx
-              }
-              totalSlips={chunkNoteItems(printJob.note.items, 6).length}
-              tenantName={session.companyName}
+              pageIndex={idx}
+              totalPages={printPages.length}
+              emitter={printJob.emitter}
               isPrintMode
             />
           ))}

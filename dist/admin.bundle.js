@@ -84,6 +84,10 @@ exports.buildWhatsAppBillingUrl = buildWhatsAppBillingUrl;
 exports.formatCnpjMask = formatCnpjMask;
 exports.isValidCNPJ = isValidCNPJ;
 exports.formatPhoneMask = formatPhoneMask;
+exports.formatCpfCnpjMask = formatCpfCnpjMask;
+exports.isValidCPF = isValidCPF;
+exports.isValidCpfOrCnpj = isValidCpfOrCnpj;
+exports.formatQuantityBR = formatQuantityBR;
 exports.PRODUCTION_STAGES = [
     {
         id: 'arquivo_recebido',
@@ -757,6 +761,53 @@ function formatPhoneMask(raw) {
         return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
     }
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+}
+function formatCpfCnpjMask(raw) {
+    const digits = String(raw || '').replace(/\D/g, '').slice(0, 14);
+    if (digits.length <= 11) {
+        if (digits.length <= 3)
+            return digits;
+        if (digits.length <= 6)
+            return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+        if (digits.length <= 9) {
+            return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+        }
+        return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+    }
+    return formatCnpjMask(digits);
+}
+function isValidCPF(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length !== 11)
+        return false;
+    if (/^(\d)\1{10}$/.test(digits))
+        return false;
+    const calc = (len) => {
+        let sum = 0;
+        for (let i = 0; i < len; i += 1) {
+            sum += Number(digits[i]) * (len + 1 - i);
+        }
+        const rem = (sum * 10) % 11;
+        return rem === 10 ? 0 : rem;
+    };
+    return calc(9) === Number(digits[9]) && calc(10) === Number(digits[10]);
+}
+function isValidCpfOrCnpj(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length === 11)
+        return isValidCPF(digits);
+    if (digits.length === 14)
+        return isValidCNPJ(digits);
+    return false;
+}
+function formatQuantityBR(value) {
+    const safe = Number.isFinite(value) ? value : 0;
+    if (Number.isInteger(safe))
+        return String(safe);
+    return safe.toLocaleString('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    });
 }
 
   },

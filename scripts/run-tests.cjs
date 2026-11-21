@@ -226,6 +226,18 @@ async function runUnitTests() {
   assert.ok(csv.includes('Data Competência;Categoria;Descrição'), 'CSV missing pt-BR ; header');
   assert.ok(csv.includes('"500,10"'), 'CSV missing pt-BR comma decimal');
   console.log('[PASS] 6. CSV export UTF-8 BOM + semicolon + pt-BR decimal');
+
+  // 7. Pedido A5 helpers: CPF/CNPJ mask, validation & quantity formatting
+  assert.equal(financeEngine.formatCpfCnpjMask('12345678909'), '123.456.789-09');
+  assert.equal(financeEngine.formatCpfCnpjMask('11222333000181'), '11.222.333/0001-81');
+  assert.equal(financeEngine.isValidCPF('123.456.789-09'), true);
+  assert.equal(financeEngine.isValidCPF('111.111.111-11'), false);
+  assert.equal(financeEngine.isValidCpfOrCnpj('123.456.789-09'), true);
+  assert.equal(financeEngine.isValidCpfOrCnpj('11.222.333/0001-81'), true);
+  assert.equal(financeEngine.isValidCpfOrCnpj('11.222.333/0001-00'), false);
+  assert.equal(financeEngine.formatQuantityBR(2), '2');
+  assert.equal(financeEngine.formatQuantityBR(1.5), '1,5');
+  console.log('[PASS] 7. Pedido A5 CPF/CNPJ mask, validation, and quantity formatting');
 }
 
 async function runLiveSupabaseSmokeCheck() {

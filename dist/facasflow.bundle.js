@@ -88,6 +88,10 @@ exports.buildWhatsAppBillingUrl = buildWhatsAppBillingUrl;
 exports.formatCnpjMask = formatCnpjMask;
 exports.isValidCNPJ = isValidCNPJ;
 exports.formatPhoneMask = formatPhoneMask;
+exports.formatCpfCnpjMask = formatCpfCnpjMask;
+exports.isValidCPF = isValidCPF;
+exports.isValidCpfOrCnpj = isValidCpfOrCnpj;
+exports.formatQuantityBR = formatQuantityBR;
 exports.PRODUCTION_STAGES = [
     {
         id: 'arquivo_recebido',
@@ -762,6 +766,53 @@ function formatPhoneMask(raw) {
     }
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 }
+function formatCpfCnpjMask(raw) {
+    const digits = String(raw || '').replace(/\D/g, '').slice(0, 14);
+    if (digits.length <= 11) {
+        if (digits.length <= 3)
+            return digits;
+        if (digits.length <= 6)
+            return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+        if (digits.length <= 9) {
+            return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+        }
+        return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+    }
+    return formatCnpjMask(digits);
+}
+function isValidCPF(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length !== 11)
+        return false;
+    if (/^(\d)\1{10}$/.test(digits))
+        return false;
+    const calc = (len) => {
+        let sum = 0;
+        for (let i = 0; i < len; i += 1) {
+            sum += Number(digits[i]) * (len + 1 - i);
+        }
+        const rem = (sum * 10) % 11;
+        return rem === 10 ? 0 : rem;
+    };
+    return calc(9) === Number(digits[9]) && calc(10) === Number(digits[10]);
+}
+function isValidCpfOrCnpj(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length === 11)
+        return isValidCPF(digits);
+    if (digits.length === 14)
+        return isValidCNPJ(digits);
+    return false;
+}
+function formatQuantityBR(value) {
+    const safe = Number.isFinite(value) ? value : 0;
+    if (Number.isInteger(safe))
+        return String(safe);
+    return safe.toLocaleString('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    });
+}
 
   },
   { dir: "./utils" }
@@ -1296,9 +1347,11 @@ async function loadCompanyDatabaseFromSupabase(empresaId, role) {
         company_id: n.empresa_id,
         numero: Number(n.numero) || 1,
         data: String(n.data || '').slice(0, 10),
+        dataSaida: n.data_saida ? String(n.data_saida).slice(0, 10) : undefined,
         empresaId: n.cliente_empresa_id || undefined,
         clienteNome: n.cliente_nome,
         cnpj: n.cnpj || '',
+        inscricao: n.inscricao || undefined,
         contato: n.contato || '',
         endereco: n.endereco || undefined,
         entreguePor: n.entregue_por || undefined,
@@ -1725,9 +1778,11 @@ async function dbSaveNote(empresaId, actorName, payload, editingId) {
             .from('notas')
             .update({
             data: payload.data,
+            data_saida: payload.dataSaida || null,
             cliente_nome: payload.clienteNome,
-            cnpj: payload.cnpj,
-            contato: payload.contato,
+            cnpj: payload.cnpj || '',
+            inscricao: payload.inscricao || null,
+            contato: payload.contato || '',
             endereco: payload.endereco || null,
             entregue_por: payload.entreguePor || null,
             os_numero: payload.osId || null,
@@ -1751,9 +1806,11 @@ async function dbSaveNote(empresaId, actorName, payload, editingId) {
             empresa_id: empresaId,
             numero: 0, // assigned atomically per company by trg_notas_prepare
             data: payload.data,
+            data_saida: payload.dataSaida || null,
             cliente_nome: payload.clienteNome,
-            cnpj: payload.cnpj,
-            contato: payload.contato,
+            cnpj: payload.cnpj || '',
+            inscricao: payload.inscricao || null,
+            contato: payload.contato || '',
             endereco: payload.endereco || null,
             entregue_por: payload.entreguePor || null,
             os_numero: payload.osId || null,
@@ -1793,10 +1850,12 @@ async function dbSaveNote(empresaId, actorName, payload, editingId) {
         company_id: savedNote.empresa_id,
         numero: Number(savedNote.numero),
         data: String(savedNote.data).slice(0, 10),
+        dataSaida: savedNote.data_saida ? String(savedNote.data_saida).slice(0, 10) : undefined,
         empresaId: savedNote.cliente_empresa_id || undefined,
         clienteNome: savedNote.cliente_nome,
-        cnpj: savedNote.cnpj,
-        contato: savedNote.contato,
+        cnpj: savedNote.cnpj || '',
+        inscricao: savedNote.inscricao || undefined,
+        contato: savedNote.contato || '',
         endereco: savedNote.endereco || undefined,
         entreguePor: savedNote.entregue_por || undefined,
         osId: savedNote.os_numero || undefined,
@@ -6806,11 +6865,112 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NotesSection = exports.CanhotoSlipCard = void 0;
+exports.NotesSection = exports.PedidoA5Sheet = exports.DEFAULT_FICTITIOUS_EMITTER = exports.PEDIDO_A5_ROWS = void 0;
+exports.loadPedidoEmitterProfile = loadPedidoEmitterProfile;
+exports.savePedidoEmitterProfile = savePedidoEmitterProfile;
+exports.createFictitiousDemoNote = createFictitiousDemoNote;
+exports.formatPedidoNumber = formatPedidoNumber;
 exports.chunkNoteItems = chunkNoteItems;
 const react_1 = __importStar(require("react"));
 const lucide_react_1 = require("lucide-react");
 const financeEngine_1 = require("../utils/financeEngine");
+exports.PEDIDO_A5_ROWS = 15;
+exports.DEFAULT_FICTITIOUS_EMITTER = {
+    monogram: 'FM',
+    brandName: 'facaria modelo',
+    subtitle: 'facas de corte e vinco',
+    phone: '(00) 3000-0000 / 9.0000-0000',
+    specialtiesLine1: 'FACAS P/ MEIO CORTE, ENVELOPES, TAGS',
+    specialtiesLine2: 'E CARTONAGEM EM GERAL',
+    email: 'contato@facariamodelo.example',
+    website: 'www.facariamodelo.example',
+    address: 'Av. Exemplo Industrial, Nº 100 - Setor Modelo - Cidade - UF',
+};
+const EMITTER_STORAGE_PREFIX = 'facasflow_pedido_a5_emitter_v1_';
+function loadPedidoEmitterProfile(tenantKey) {
+    try {
+        if (typeof window === 'undefined' || !window.localStorage) {
+            return exports.DEFAULT_FICTITIOUS_EMITTER;
+        }
+        const raw = window.localStorage.getItem(`${EMITTER_STORAGE_PREFIX}${tenantKey || 'default'}`);
+        if (!raw)
+            return exports.DEFAULT_FICTITIOUS_EMITTER;
+        const parsed = JSON.parse(raw);
+        return {
+            ...exports.DEFAULT_FICTITIOUS_EMITTER,
+            ...(parsed && typeof parsed === 'object' ? parsed : {}),
+        };
+    }
+    catch {
+        return exports.DEFAULT_FICTITIOUS_EMITTER;
+    }
+}
+function savePedidoEmitterProfile(tenantKey, profile) {
+    try {
+        if (typeof window === 'undefined' || !window.localStorage)
+            return;
+        window.localStorage.setItem(`${EMITTER_STORAGE_PREFIX}${tenantKey || 'default'}`, JSON.stringify(profile));
+    }
+    catch {
+        // non-blocking
+    }
+}
+function createFictitiousDemoNote(nextNumber) {
+    const today = (0, financeEngine_1.toISODate)();
+    const items = [
+        {
+            id: 'DEMO-IT-1',
+            descricao: 'Faca Caixa Cartão 300g com Tampa Automática (18mm)',
+            quantidade: 1,
+            precoUnitario: 380,
+            total: 380,
+        },
+        {
+            id: 'DEMO-IT-2',
+            descricao: 'Faca Tag Retangular 50×90 mm c/ Furo Central (Meio Corte)',
+            quantidade: 2,
+            precoUnitario: 165,
+            total: 330,
+        },
+        {
+            id: 'DEMO-IT-3',
+            descricao: 'Emborrachamento Técnico e Ajuste Fino de Vinco',
+            quantidade: 1,
+            precoUnitario: 95.5,
+            total: 95.5,
+        },
+    ];
+    const total = (0, financeEngine_1.roundCurrencyBRL)(items.reduce((sum, item) => sum + item.total, 0));
+    return {
+        id: '__demo_a5__',
+        numero: Math.max(1, nextNumber),
+        data: today,
+        dataSaida: (0, financeEngine_1.addDays)(today, 2),
+        clienteNome: 'Gráfica Horizonte Ltda (Exemplo)',
+        cnpj: '11.222.333/0001-81',
+        inscricao: 'ISENTO',
+        contato: '(00) 99123-4567',
+        endereco: 'Rua das Artes Gráficas, 250 - Centro - Cidade Exemplo - UF',
+        status: 'rascunho',
+        items,
+        total,
+        criadoPor: 'Protótipo',
+        criadoEm: new Date().toISOString(),
+    };
+}
+function formatPedidoNumber(numero) {
+    return String(Math.max(1, Math.floor(Number(numero) || 1))).padStart(5, '0');
+}
+function chunkNoteItems(items, size = exports.PEDIDO_A5_ROWS) {
+    if (!items || items.length === 0)
+        return [[]];
+    const safeSize = Math.max(1, size);
+    const chunks = [];
+    for (let i = 0; i < items.length; i += safeSize) {
+        chunks.push(items.slice(i, i + safeSize));
+    }
+    return chunks;
+}
 const NOTE_STATUS_META = {
     rascunho: {
         label: 'Rascunho',
@@ -6829,155 +6989,639 @@ const NOTE_STATUS_META = {
         badgeClass: 'bg-rose-500/15 text-rose-800 border-rose-300/60',
     },
 };
-function chunkNoteItems(items, size = 6) {
-    if (!items || items.length === 0)
-        return [[]];
-    const chunks = [];
-    for (let i = 0; i < items.length; i += size) {
-        chunks.push(items.slice(i, i + size));
-    }
-    return chunks;
-}
-const CanhotoSlipCard = ({ note, itemsChunk, slipIndex, totalSlips, tenantName, isPrintMode = false, }) => {
-    const slipTotal = itemsChunk.reduce((sum, it) => sum + (it.total || 0), 0);
-    const formattedNum = String(note.numero).padStart(4, '0');
-    return (react_1.default.createElement("div", { className: isPrintMode
-            ? 'canhoto-slip flex flex-col justify-between bg-white text-black'
-            : 'canhoto-slip-screen rounded-md shadow-md border border-slate-300 flex flex-col justify-between bg-white text-black', style: { fontSize: '9pt', color: '#000000', backgroundColor: '#ffffff' } },
-        react_1.default.createElement("div", { className: "flex-1 flex flex-col justify-between p-2", style: { border: '1px solid #000000' } },
-            react_1.default.createElement("div", { className: "flex items-start justify-between gap-2 pb-1.5", style: { borderBottom: '1px solid #000000' } },
-                react_1.default.createElement("div", { className: "min-w-0" },
-                    react_1.default.createElement("div", { className: "font-bold uppercase tracking-wide", style: { fontSize: '11pt', lineHeight: 1.2 } },
-                        tenantName || 'Qualifacas',
-                        " \u2014 Canhoto de Entrega N\u00BA ",
-                        formattedNum,
-                        totalSlips > 1 ? ` (${slipIndex + 1}/${totalSlips})` : ''),
-                    react_1.default.createElement("div", { className: "mt-0.5", style: { fontSize: '9pt' } },
-                        react_1.default.createElement("strong", null, "Cliente:"),
-                        " ",
-                        note.clienteNome,
-                        " \u2022",
-                        ' ',
-                        react_1.default.createElement("strong", null, "CNPJ:"),
-                        " ",
-                        note.cnpj),
-                    react_1.default.createElement("div", { style: { fontSize: '9pt' } },
-                        react_1.default.createElement("strong", null, "Contato:"),
-                        " ",
-                        note.contato,
-                        note.endereco ? ` • Endereço: ${note.endereco}` : '')),
-                react_1.default.createElement("div", { className: "text-right shrink-0", style: { fontSize: '9pt' } },
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("strong", null, "Emiss\u00E3o:"),
-                        " ",
-                        (0, financeEngine_1.formatDateBR)(note.data)),
-                    note.osId && (react_1.default.createElement("div", null,
-                        react_1.default.createElement("strong", null, "OS:"),
-                        " ",
-                        note.osId)))),
-            react_1.default.createElement("div", { className: "flex-1 py-1" },
-                react_1.default.createElement("table", { className: "w-full border-collapse text-left", style: { fontSize: '9pt' } },
-                    react_1.default.createElement("thead", null,
-                        react_1.default.createElement("tr", { style: { borderBottom: '1px solid #000000' } },
-                            react_1.default.createElement("th", { className: "py-0.5 pr-2 font-bold" }, "Descri\u00E7\u00E3o"),
-                            react_1.default.createElement("th", { className: "py-0.5 px-2 font-bold text-right w-14" }, "Qtd."),
-                            react_1.default.createElement("th", { className: "py-0.5 px-2 font-bold text-right w-24" }, "Unit\u00E1rio"),
-                            react_1.default.createElement("th", { className: "py-0.5 pl-2 font-bold text-right w-24" }, "Total"))),
-                    react_1.default.createElement("tbody", null, itemsChunk.map((item) => (react_1.default.createElement("tr", { key: item.id, style: { borderBottom: '1px solid #d4d4d8' } },
-                        react_1.default.createElement("td", { className: "py-0.5 pr-2 truncate max-w-[95mm]" }, item.descricao),
-                        react_1.default.createElement("td", { className: "py-0.5 px-2 text-right font-mono" }, item.quantidade),
-                        react_1.default.createElement("td", { className: "py-0.5 px-2 text-right font-mono" }, (0, financeEngine_1.formatBRL)(item.precoUnitario)),
-                        react_1.default.createElement("td", { className: "py-0.5 pl-2 text-right font-mono font-bold" }, (0, financeEngine_1.formatBRL)(item.total)))))),
-                    react_1.default.createElement("tfoot", null,
-                        react_1.default.createElement("tr", { style: { borderTop: '1px solid #000000' } },
-                            react_1.default.createElement("td", { colSpan: 3, className: "pt-1 text-right font-bold" }, totalSlips > 1
-                                ? `Subtotal folha (${slipIndex + 1}/${totalSlips}) / Total Geral (${(0, financeEngine_1.formatBRL)(note.total)}):`
-                                : 'Total Geral:'),
-                            react_1.default.createElement("td", { className: "pt-1 pl-2 text-right font-mono font-bold", style: { fontSize: '10pt' } }, (0, financeEngine_1.formatBRL)(totalSlips > 1 ? slipTotal : note.total)))))),
-            react_1.default.createElement("div", { className: "pt-1.5 grid grid-cols-12 gap-2 items-end", style: { borderTop: '1px solid #000000', fontSize: '9pt' } },
-                react_1.default.createElement("div", { className: "col-span-4" },
-                    react_1.default.createElement("div", { className: "h-3.5", style: { borderBottom: '1px solid #000000' } }),
-                    react_1.default.createElement("span", null, "Recebido por (nome leg\u00EDvel)")),
-                react_1.default.createElement("div", { className: "col-span-4" },
-                    react_1.default.createElement("div", { className: "h-3.5", style: { borderBottom: '1px solid #000000' } }),
-                    react_1.default.createElement("span", null, "Assinatura do cliente")),
-                react_1.default.createElement("div", { className: "col-span-2" },
-                    react_1.default.createElement("div", { className: "h-3.5", style: { borderBottom: '1px solid #000000' } }),
-                    react_1.default.createElement("span", null, "Data do recebimento")),
-                react_1.default.createElement("div", { className: "col-span-2" },
-                    react_1.default.createElement("div", { className: "h-3.5 truncate", style: { borderBottom: '1px solid #000000' } }, note.entreguePor || ''),
-                    react_1.default.createElement("span", null, "Entregue por")))),
-        react_1.default.createElement("div", { className: "pt-1 text-center", style: { fontSize: '9pt' } },
-            react_1.default.createElement("div", { className: "w-full", style: { borderTop: '1px dashed #000000' } }),
-            react_1.default.createElement("span", { className: "inline-block bg-white px-2 -mt-2.5 text-[8.5pt] font-semibold tracking-wider uppercase" }, "Corte aqui"))));
+const PedidoBrandMark = ({ monogram }) => {
+    const letters = (monogram || 'FM').trim().slice(0, 3).toUpperCase();
+    return (react_1.default.createElement("svg", { viewBox: "0 0 88 54", fill: "none", xmlns: "http://www.w3.org/2000/svg", style: {
+            width: 'calc(21.5 * var(--u))',
+            height: 'calc(13.2 * var(--u))',
+            display: 'block',
+        }, "aria-hidden": "true" },
+        react_1.default.createElement("rect", { x: "4", y: "4", width: "80", height: "46", rx: "12", stroke: "#b84a39", strokeWidth: "3.2" }),
+        react_1.default.createElement("path", { d: "M18 11H70M18 43H70", stroke: "#b84a39", strokeWidth: "1.2", strokeDasharray: "4 3", opacity: "0.7" }),
+        react_1.default.createElement("circle", { cx: "15", cy: "27", r: "3", fill: "#b84a39", opacity: "0.85" }),
+        react_1.default.createElement("circle", { cx: "73", cy: "27", r: "3", fill: "#b84a39", opacity: "0.85" }),
+        react_1.default.createElement("text", { x: "44", y: "34.5", textAnchor: "middle", fill: "#b84a39", fontFamily: "Inter, Plus Jakarta Sans, Arial, sans-serif", fontWeight: "800", fontSize: "24", letterSpacing: "1.5" }, letters)));
 };
-exports.CanhotoSlipCard = CanhotoSlipCard;
-const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, globalSearchQuery, onSaveNote, onMarkNotePrinted, onDeleteNote, onTriggerPrint, }) => {
+const PedidoA5Sheet = ({ note, itemsChunk, pageIndex, totalPages, emitter = exports.DEFAULT_FICTITIOUS_EMITTER, isPrintMode = false, }) => {
+    const formattedNum = formatPedidoNumber(note.numero);
+    const pageTotal = (0, financeEngine_1.roundCurrencyBRL)(itemsChunk.reduce((sum, it) => sum + (Number(it.total) || 0), 0));
+    const grandTotal = (0, financeEngine_1.roundCurrencyBRL)(note.items.reduce((sum, it) => sum + (Number(it.total) || 0), 0));
+    const displayTotal = totalPages > 1 && pageIndex < totalPages - 1 ? pageTotal : grandTotal;
+    const totalBoxLabel = totalPages > 1 && pageIndex < totalPages - 1 ? 'SUBTOTAL' : 'TOTAL';
+    const rowSlots = Array.from({ length: exports.PEDIDO_A5_ROWS }, (_, i) => {
+        return itemsChunk[i] || null;
+    });
+    const thinBorder = 'calc(0.32 * var(--u)) solid #27272a';
+    const innerRule = 'calc(0.22 * var(--u)) solid #52525b';
+    const radius = 'calc(2.4 * var(--u))';
+    const sheetBody = (react_1.default.createElement("div", { className: `pedido-a5-doc${isPrintMode ? ' pedido-a5-print' : ''}`, "data-pedido-sheet": "a5", "data-pedido-numero": formattedNum },
+        react_1.default.createElement("div", { style: {
+                display: 'flex',
+                alignItems: 'stretch',
+                gap: 'calc(1.2 * var(--u))',
+                height: 'calc(30.5 * var(--u))',
+                flexShrink: 0,
+            } },
+            react_1.default.createElement("div", { style: {
+                    flex: 1,
+                    minWidth: 0,
+                    border: thinBorder,
+                    borderRadius: radius,
+                    padding: 'calc(1.8 * var(--u)) calc(2.4 * var(--u))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'calc(2 * var(--u))',
+                    backgroundColor: '#ffffff',
+                } },
+                react_1.default.createElement("div", { style: {
+                        width: 'calc(28 * var(--u))',
+                        flexShrink: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 'calc(0.6 * var(--u))',
+                    } },
+                    react_1.default.createElement(PedidoBrandMark, { monogram: emitter.monogram }),
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(3.05 * var(--u))',
+                            fontWeight: 800,
+                            color: '#b84a39',
+                            lineHeight: 1.05,
+                            letterSpacing: '-0.02em',
+                            textAlign: 'center',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                        } }, emitter.brandName),
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(1.85 * var(--u))',
+                            fontWeight: 600,
+                            color: '#a14435',
+                            lineHeight: 1.05,
+                            textAlign: 'center',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                        } }, emitter.subtitle)),
+                react_1.default.createElement("div", { style: {
+                        flex: 1,
+                        minWidth: 0,
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        textAlign: 'center',
+                        paddingTop: 'calc(0.3 * var(--u))',
+                        paddingBottom: 'calc(0.3 * var(--u))',
+                    } },
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(3.35 * var(--u))',
+                            fontWeight: 800,
+                            color: '#b84a39',
+                            lineHeight: 1.12,
+                            letterSpacing: '0.01em',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                        } }, emitter.phone),
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(2.15 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            lineHeight: 1.25,
+                            textTransform: 'uppercase',
+                        } },
+                        react_1.default.createElement("div", null, emitter.specialtiesLine1),
+                        react_1.default.createElement("div", null, emitter.specialtiesLine2)),
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(2.25 * var(--u))',
+                            fontWeight: 600,
+                            color: '#b84a39',
+                            lineHeight: 1.22,
+                            maxWidth: '100%',
+                        } },
+                        react_1.default.createElement("div", { style: {
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                            } }, emitter.email),
+                        react_1.default.createElement("div", { style: {
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                            } }, emitter.website)),
+                    react_1.default.createElement("div", { style: {
+                            fontSize: 'calc(1.95 * var(--u))',
+                            fontWeight: 600,
+                            color: '#27272a',
+                            lineHeight: 1.15,
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                        } }, emitter.address))),
+            react_1.default.createElement("div", { style: {
+                    width: 'calc(35.5 * var(--u))',
+                    flexShrink: 0,
+                    border: thinBorder,
+                    borderRadius: radius,
+                    padding: 'calc(2.4 * var(--u)) calc(2 * var(--u))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: '#ffffff',
+                } },
+                react_1.default.createElement("div", { style: {
+                        fontSize: 'calc(5.1 * var(--u))',
+                        fontWeight: 800,
+                        color: '#27272a',
+                        letterSpacing: '0.06em',
+                        lineHeight: 1.05,
+                        textTransform: 'uppercase',
+                    } }, "PEDIDO"),
+                react_1.default.createElement("div", { style: {
+                        fontSize: 'calc(4.85 * var(--u))',
+                        fontWeight: 700,
+                        color: '#c2412d',
+                        fontVariantNumeric: 'tabular-nums',
+                        letterSpacing: '0.08em',
+                        lineHeight: 1.05,
+                        marginBottom: totalPages > 1 ? 'calc(0.4 * var(--u))' : 'calc(2.8 * var(--u))',
+                    } }, formattedNum),
+                totalPages > 1 && (react_1.default.createElement("div", { style: {
+                        fontSize: 'calc(1.85 * var(--u))',
+                        fontWeight: 700,
+                        color: '#52525b',
+                        lineHeight: 1,
+                    } },
+                    "FOLHA ",
+                    pageIndex + 1,
+                    "/",
+                    totalPages)))),
+        react_1.default.createElement("div", { style: {
+                marginTop: 'calc(1.2 * var(--u))',
+                border: thinBorder,
+                borderRadius: radius,
+                overflow: 'hidden',
+                flexShrink: 0,
+                backgroundColor: '#ffffff',
+            } },
+            react_1.default.createElement("div", { style: {
+                    height: 'calc(6.4 * var(--u))',
+                    padding: '0 calc(2.2 * var(--u))',
+                    borderBottom: innerRule,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'calc(2 * var(--u))',
+                } },
+                react_1.default.createElement("div", { style: {
+                        width: '62%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "CLIENTE:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.65 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            minWidth: 0,
+                        } }, note.clienteNome)),
+                react_1.default.createElement("div", { style: {
+                        width: '38%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "FONE:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            minWidth: 0,
+                        } }, note.contato))),
+            react_1.default.createElement("div", { style: {
+                    height: 'calc(6.4 * var(--u))',
+                    padding: '0 calc(2.2 * var(--u))',
+                    borderBottom: innerRule,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'calc(1.2 * var(--u))',
+                    minWidth: 0,
+                } },
+                react_1.default.createElement("span", { style: {
+                        fontSize: 'calc(2.2 * var(--u))',
+                        fontWeight: 700,
+                        color: '#27272a',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                    } }, "ENDERE\u00C7O:"),
+                react_1.default.createElement("span", { style: {
+                        fontSize: 'calc(2.6 * var(--u))',
+                        fontWeight: 500,
+                        color: '#09090b',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                    } }, note.endereco || '')),
+            react_1.default.createElement("div", { style: {
+                    height: 'calc(6.4 * var(--u))',
+                    padding: '0 calc(2.2 * var(--u))',
+                    borderBottom: innerRule,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'calc(2 * var(--u))',
+                } },
+                react_1.default.createElement("div", { style: {
+                        width: '62%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "CNPJ/CPF:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            fontVariantNumeric: 'tabular-nums',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            minWidth: 0,
+                        } }, note.cnpj)),
+                react_1.default.createElement("div", { style: {
+                        width: '38%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "INSCRI\u00C7\u00C3O:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            minWidth: 0,
+                        } }, note.inscricao || ''))),
+            react_1.default.createElement("div", { style: {
+                    height: 'calc(6.4 * var(--u))',
+                    padding: '0 calc(2.2 * var(--u))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'calc(2 * var(--u))',
+                } },
+                react_1.default.createElement("div", { style: {
+                        width: '62%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "DATA ENTRADA:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                        } }, note.data ? (0, financeEngine_1.formatDateBR)(note.data) : ''),
+                    note.osId && (react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.05 * var(--u))',
+                            fontWeight: 700,
+                            color: '#52525b',
+                            marginLeft: 'calc(2 * var(--u))',
+                            whiteSpace: 'nowrap',
+                        } },
+                        "(",
+                        note.osId,
+                        ")"))),
+                react_1.default.createElement("div", { style: {
+                        width: '38%',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 'calc(1.2 * var(--u))',
+                        minWidth: 0,
+                    } },
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.2 * var(--u))',
+                            fontWeight: 700,
+                            color: '#27272a',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                        } }, "DATA SA\u00CDDA:"),
+                    react_1.default.createElement("span", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                        } }, note.dataSaida ? (0, financeEngine_1.formatDateBR)(note.dataSaida) : '')))),
+        react_1.default.createElement("div", { style: {
+                marginTop: 'calc(1.2 * var(--u))',
+                flex: 1,
+                minHeight: 0,
+                border: thinBorder,
+                borderRadius: radius,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                backgroundColor: '#ffffff',
+            } },
+            react_1.default.createElement("table", { className: "pedido-a5-table" },
+                react_1.default.createElement("colgroup", null,
+                    react_1.default.createElement("col", { style: { width: '10.5%' } }),
+                    react_1.default.createElement("col", { style: { width: '67.5%' } }),
+                    react_1.default.createElement("col", { style: { width: '22%' } })),
+                react_1.default.createElement("thead", null,
+                    react_1.default.createElement("tr", { style: {
+                            height: 'calc(6.2 * var(--u))',
+                            borderBottom: thinBorder,
+                            backgroundColor: '#fafafa',
+                        } },
+                        react_1.default.createElement("th", { style: {
+                                borderRight: thinBorder,
+                                fontSize: 'calc(2.2 * var(--u))',
+                                fontWeight: 700,
+                                color: '#27272a',
+                                textAlign: 'center',
+                                padding: '0 calc(0.8 * var(--u))',
+                                letterSpacing: '0.02em',
+                            } }, "QUANT."),
+                        react_1.default.createElement("th", { style: {
+                                borderRight: thinBorder,
+                                fontSize: 'calc(2.25 * var(--u))',
+                                fontWeight: 700,
+                                color: '#27272a',
+                                textAlign: 'center',
+                                padding: '0 calc(1.5 * var(--u))',
+                                letterSpacing: '0.03em',
+                            } }, "DESCRI\u00C7\u00C3O DOS SERVI\u00C7OS"),
+                        react_1.default.createElement("th", { style: {
+                                fontSize: 'calc(2.25 * var(--u))',
+                                fontWeight: 700,
+                                color: '#27272a',
+                                textAlign: 'center',
+                                padding: '0 calc(1.5 * var(--u))',
+                                letterSpacing: '0.03em',
+                            } }, "VALOR"))),
+                react_1.default.createElement("tbody", null, rowSlots.map((item, idx) => (react_1.default.createElement("tr", { key: item ? item.id : `empty-row-${idx}`, style: {
+                        height: `${100 / exports.PEDIDO_A5_ROWS}%`,
+                        borderBottom: idx < exports.PEDIDO_A5_ROWS - 1 ? innerRule : 'none',
+                    } },
+                    react_1.default.createElement("td", { style: {
+                            borderRight: thinBorder,
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            textAlign: 'center',
+                            fontVariantNumeric: 'tabular-nums',
+                            padding: '0 calc(1 * var(--u))',
+                            whiteSpace: 'nowrap',
+                        } }, item ? (0, financeEngine_1.formatQuantityBR)(item.quantidade) : '\u00A0'),
+                    react_1.default.createElement("td", { style: {
+                            borderRight: thinBorder,
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 500,
+                            color: '#09090b',
+                            textAlign: 'left',
+                            padding: '0 calc(2 * var(--u))',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                        } }, item ? item.descricao : '\u00A0'),
+                    react_1.default.createElement("td", { style: {
+                            fontSize: 'calc(2.6 * var(--u))',
+                            fontWeight: 600,
+                            color: '#09090b',
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            padding: '0 calc(2 * var(--u))',
+                            whiteSpace: 'nowrap',
+                        } }, item ? (0, financeEngine_1.formatBRL)(item.total) : '\u00A0'))))))),
+        react_1.default.createElement("div", { style: {
+                marginTop: 'calc(1.8 * var(--u))',
+                height: 'calc(10.4 * var(--u))',
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'flex-end',
+            } },
+            react_1.default.createElement("div", { style: {
+                    width: '78%',
+                    paddingRight: 'calc(3 * var(--u))',
+                    paddingBottom: 'calc(0.4 * var(--u))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                } },
+                react_1.default.createElement("div", { style: {
+                        width: '82%',
+                        borderBottom: 'calc(0.28 * var(--u)) solid #27272a',
+                        marginBottom: 'calc(1 * var(--u))',
+                    } }),
+                react_1.default.createElement("span", { style: {
+                        fontSize: 'calc(2.15 * var(--u))',
+                        fontWeight: 700,
+                        color: '#27272a',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                    } }, "ASSINATURA DO CLIENTE")),
+            react_1.default.createElement("div", { style: {
+                    width: '22%',
+                    height: 'calc(9.4 * var(--u))',
+                    border: thinBorder,
+                    borderRadius: 'calc(2 * var(--u))',
+                    padding: 'calc(0.9 * var(--u)) calc(1.8 * var(--u))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    backgroundColor: '#ffffff',
+                }, "data-pedido-total-box": "true" },
+                react_1.default.createElement("span", { style: {
+                        fontSize: 'calc(1.65 * var(--u))',
+                        fontWeight: 700,
+                        color: '#52525b',
+                        letterSpacing: '0.05em',
+                        lineHeight: 1,
+                        textTransform: 'uppercase',
+                    } }, totalBoxLabel),
+                react_1.default.createElement("span", { style: {
+                        fontSize: 'calc(3.05 * var(--u))',
+                        fontWeight: 800,
+                        color: '#09090b',
+                        textAlign: 'right',
+                        fontVariantNumeric: 'tabular-nums',
+                        lineHeight: 1.05,
+                        whiteSpace: 'nowrap',
+                    } }, (0, financeEngine_1.formatBRL)(displayTotal))))));
+    if (isPrintMode) {
+        return sheetBody;
+    }
+    return react_1.default.createElement("div", { className: "pedido-a5-screen-frame" }, sheetBody);
+};
+exports.PedidoA5Sheet = PedidoA5Sheet;
+const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantKey, globalSearchQuery, onSaveNote, onMarkNotePrinted, onDeleteNote, onTriggerPrint, onSyncPrintPreview, }) => {
     const [viewMode, setViewMode] = (0, react_1.useState)('list');
     const [editingId, setEditingId] = (0, react_1.useState)(undefined);
     const [previewNoteId, setPreviewNoteId] = (0, react_1.useState)(null);
+    const [demoPreviewNote, setDemoPreviewNote] = (0, react_1.useState)(null);
+    const [isSaving, setIsSaving] = (0, react_1.useState)(false);
+    // Emitter header profile (defaults to strictly fictitious prototype data)
+    const [emitter, setEmitter] = (0, react_1.useState)(() => loadPedidoEmitterProfile(tenantKey));
+    const [showEmitterPanel, setShowEmitterPanel] = (0, react_1.useState)(false);
     // Form states
     const [numero, setNumero] = (0, react_1.useState)(nextNoteNumber);
-    const [data, setData] = (0, react_1.useState)(() => (0, financeEngine_1.toISODate)());
+    const [dataEntrada, setDataEntrada] = (0, react_1.useState)(() => (0, financeEngine_1.toISODate)());
+    const [dataSaida, setDataSaida] = (0, react_1.useState)(() => (0, financeEngine_1.toISODate)());
     const [selectedCompanyId, setSelectedCompanyId] = (0, react_1.useState)('manual');
     const [selectedOrderId, setSelectedOrderId] = (0, react_1.useState)('');
     const [clienteNome, setClienteNome] = (0, react_1.useState)('');
-    const [cnpj, setCnpj] = (0, react_1.useState)('');
-    const [contatoNome, setContatoNome] = (0, react_1.useState)('');
-    const [contatoTelefone, setContatoTelefone] = (0, react_1.useState)('');
+    const [cnpjCpf, setCnpjCpf] = (0, react_1.useState)('');
+    const [inscricao, setInscricao] = (0, react_1.useState)('');
+    const [fone, setFone] = (0, react_1.useState)('');
     const [endereco, setEndereco] = (0, react_1.useState)('');
-    const [entreguePor, setEntreguePor] = (0, react_1.useState)('');
     const [status, setStatus] = (0, react_1.useState)('emitida');
     const [items, setItems] = (0, react_1.useState)([
         { id: 'IT-1', descricao: '', quantidade: 1, precoUnitario: 0, total: 0 },
     ]);
     const [formError, setFormError] = (0, react_1.useState)(null);
+    const updateEmitterField = (field, value) => {
+        setEmitter((prev) => {
+            const next = { ...prev, [field]: value };
+            savePedidoEmitterProfile(tenantKey, next);
+            return next;
+        });
+    };
+    const resetEmitterToFictitious = () => {
+        setEmitter(exports.DEFAULT_FICTITIOUS_EMITTER);
+        savePedidoEmitterProfile(tenantKey, exports.DEFAULT_FICTITIOUS_EMITTER);
+    };
     const openNewForm = () => {
         setEditingId(undefined);
+        setDemoPreviewNote(null);
         setNumero(nextNoteNumber);
-        setData((0, financeEngine_1.toISODate)());
-        setSelectedCompanyId(companies[0]?.id || 'manual');
+        const today = (0, financeEngine_1.toISODate)();
+        setDataEntrada(today);
+        setDataSaida(today);
+        setSelectedCompanyId('manual');
         setSelectedOrderId('');
-        if (companies[0]) {
-            setClienteNome(companies[0].corporateName);
-            setCnpj((0, financeEngine_1.formatCnpjMask)(companies[0].cnpj));
-            setContatoNome(companies[0].contactName);
-            setContatoTelefone((0, financeEngine_1.formatPhoneMask)(companies[0].phone));
-        }
-        else {
-            setClienteNome('');
-            setCnpj('');
-            setContatoNome('');
-            setContatoTelefone('');
-        }
+        setClienteNome('');
+        setCnpjCpf('');
+        setInscricao('');
+        setFone('');
         setEndereco('');
-        setEntreguePor('');
         setStatus('emitida');
         setItems([
-            { id: `IT-${Date.now()}`, descricao: '', quantidade: 1, precoUnitario: 0, total: 0 },
+            {
+                id: `IT-${Date.now()}`,
+                descricao: '',
+                quantidade: 1,
+                precoUnitario: 0,
+                total: 0,
+            },
         ]);
         setFormError(null);
         setViewMode('form');
     };
     const openEditForm = (note) => {
-        setEditingId(note.id);
-        setNumero(note.numero);
-        setData(note.data);
+        setEditingId(note.id === '__demo_a5__' ? undefined : note.id);
+        setDemoPreviewNote(null);
+        setNumero(note.id === '__demo_a5__' ? nextNoteNumber : note.numero);
+        setDataEntrada(note.data || (0, financeEngine_1.toISODate)());
+        setDataSaida(note.dataSaida || '');
         setSelectedCompanyId(note.empresaId || 'manual');
         setSelectedOrderId(note.osId || '');
         setClienteNome(note.clienteNome);
-        setCnpj((0, financeEngine_1.formatCnpjMask)(note.cnpj));
-        const parts = note.contato.split(' - ');
-        setContatoNome(parts[0] || '');
-        setContatoTelefone(parts[1] ? (0, financeEngine_1.formatPhoneMask)(parts[1]) : '');
+        setCnpjCpf((0, financeEngine_1.formatCpfCnpjMask)(note.cnpj));
+        setInscricao(note.inscricao || '');
+        setFone(note.contato || '');
         setEndereco(note.endereco || '');
-        setEntreguePor(note.entreguePor || '');
-        setStatus(note.status);
+        setStatus(note.id === '__demo_a5__' ? 'emitida' : note.status);
         setItems(note.items.length > 0
-            ? note.items
-            : [{ id: `IT-${Date.now()}`, descricao: '', quantidade: 1, precoUnitario: 0, total: 0 }]);
+            ? note.items.map((it) => ({ ...it }))
+            : [
+                {
+                    id: `IT-${Date.now()}`,
+                    descricao: '',
+                    quantidade: 1,
+                    precoUnitario: 0,
+                    total: 0,
+                },
+            ]);
         setFormError(null);
         setViewMode('form');
+    };
+    const openFictitiousDemoPreview = () => {
+        const demo = createFictitiousDemoNote(nextNoteNumber);
+        setDemoPreviewNote(demo);
+        setPreviewNoteId(null);
+        setViewMode('preview');
+    };
+    const handleFillFictitiousInForm = () => {
+        const demo = createFictitiousDemoNote(numero);
+        setSelectedCompanyId('manual');
+        setSelectedOrderId('');
+        setClienteNome(demo.clienteNome);
+        setCnpjCpf(demo.cnpj);
+        setInscricao(demo.inscricao || 'ISENTO');
+        setFone(demo.contato);
+        setEndereco(demo.endereco || '');
+        setDataEntrada(demo.data);
+        setDataSaida(demo.dataSaida || demo.data);
+        setItems(demo.items.map((it, idx) => ({
+            ...it,
+            id: `IT-${Date.now()}-${idx + 1}`,
+        })));
+        setFormError(null);
     };
     const handleCompanySelect = (compId) => {
         setSelectedCompanyId(compId);
@@ -6986,9 +7630,11 @@ const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, gl
         const comp = companies.find((c) => c.id === compId);
         if (comp) {
             setClienteNome(comp.corporateName);
-            setCnpj((0, financeEngine_1.formatCnpjMask)(comp.cnpj));
-            setContatoNome(comp.contactName);
-            setContatoTelefone((0, financeEngine_1.formatPhoneMask)(comp.phone));
+            setCnpjCpf((0, financeEngine_1.formatCpfCnpjMask)(comp.cnpj));
+            setFone((0, financeEngine_1.formatPhoneMask)(comp.phone));
+            if (comp.city && !endereco.trim()) {
+                setEndereco(comp.city);
+            }
         }
     };
     const handleImportFromOrder = (orderId) => {
@@ -7002,26 +7648,55 @@ const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, gl
         if (comp) {
             setSelectedCompanyId(comp.id);
             setClienteNome(comp.corporateName);
-            setCnpj((0, financeEngine_1.formatCnpjMask)(comp.cnpj));
-            setContatoNome(comp.contactName);
-            setContatoTelefone((0, financeEngine_1.formatPhoneMask)(comp.phone));
+            setCnpjCpf((0, financeEngine_1.formatCpfCnpjMask)(comp.cnpj));
+            setFone((0, financeEngine_1.formatPhoneMask)(comp.phone || ord.companyPhone));
+            setEndereco(comp.city || '');
         }
         else {
             setSelectedCompanyId('manual');
             setClienteNome(ord.companyName);
-            setContatoNome('Compras / PCP');
-            setContatoTelefone((0, financeEngine_1.formatPhoneMask)(ord.companyPhone));
+            setFone((0, financeEngine_1.formatPhoneMask)(ord.companyPhone));
         }
-        const rowTotal = Math.round((ord.amount || 0) * 100) / 100;
+        const entryDate = ord.createdAt && /^\d{4}-\d{2}-\d{2}/.test(ord.createdAt)
+            ? ord.createdAt.slice(0, 10)
+            : (0, financeEngine_1.toISODate)();
+        const exitDate = ord.dueDate && /^\d{4}-\d{2}-\d{2}/.test(ord.dueDate)
+            ? ord.dueDate.slice(0, 10)
+            : (0, financeEngine_1.toISODate)();
+        setDataEntrada(entryDate);
+        setDataSaida(exitDate);
+        const amount = (0, financeEngine_1.roundCurrencyBRL)(ord.amount || 0);
         setItems([
             {
                 id: `IT-${Date.now()}`,
                 descricao: ord.toolDescription,
                 quantidade: 1,
-                precoUnitario: ord.amount || 0,
-                total: rowTotal,
+                precoUnitario: amount,
+                total: amount,
             },
         ]);
+        setFormError(null);
+    };
+    const handleAppendOrderAsItem = (orderId) => {
+        if (!orderId)
+            return;
+        const ord = orders.find((o) => o.id === orderId);
+        if (!ord)
+            return;
+        const amount = (0, financeEngine_1.roundCurrencyBRL)(ord.amount || 0);
+        setItems((prev) => {
+            const cleaned = prev.filter((r) => r.descricao.trim() !== '' || r.precoUnitario > 0);
+            return [
+                ...cleaned,
+                {
+                    id: `IT-${Date.now()}-${cleaned.length + 1}`,
+                    descricao: `${ord.id} — ${ord.toolDescription}`,
+                    quantidade: 1,
+                    precoUnitario: amount,
+                    total: amount,
+                },
+            ];
+        });
     };
     const updateRow = (idx, field, value) => {
         setItems((prev) => prev.map((row, i) => {
@@ -7039,7 +7714,7 @@ const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, gl
                 descricao: nextDesc,
                 quantidade: nextQty,
                 precoUnitario: nextPrice,
-                total: Math.round(nextQty * nextPrice * 100) / 100,
+                total: (0, financeEngine_1.roundCurrencyBRL)(nextQty * nextPrice),
             };
         }));
     };
@@ -7056,91 +7731,213 @@ const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, gl
         ]);
     };
     const handleRemoveRow = (idx) => {
-        setItems((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+        setItems((prev) => prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx));
     };
-    const tableTotal = items.reduce((sum, it) => sum + (it.total || 0), 0);
-    const handleSubmit = (e) => {
+    const tableTotal = (0, financeEngine_1.roundCurrencyBRL)(items.reduce((sum, it) => sum + (it.total || 0), 0));
+    // Live draft note used for instant A5 preview while editing the form
+    const liveDraftNote = (0, react_1.useMemo)(() => ({
+        id: editingId || '__draft__',
+        numero,
+        data: dataEntrada || (0, financeEngine_1.toISODate)(),
+        dataSaida: dataSaida || undefined,
+        empresaId: selectedCompanyId !== 'manual' ? selectedCompanyId : undefined,
+        clienteNome: clienteNome.trim(),
+        cnpj: cnpjCpf.trim(),
+        inscricao: inscricao.trim() || undefined,
+        contato: fone.trim(),
+        endereco: endereco.trim() || undefined,
+        osId: selectedOrderId || undefined,
+        status,
+        items: items.filter((it) => it.descricao.trim() !== '' || it.total > 0),
+        total: tableTotal,
+        criadoPor: '',
+        criadoEm: '',
+    }), [
+        editingId,
+        numero,
+        dataEntrada,
+        dataSaida,
+        selectedCompanyId,
+        clienteNome,
+        cnpjCpf,
+        inscricao,
+        fone,
+        endereco,
+        selectedOrderId,
+        status,
+        items,
+        tableTotal,
+    ]);
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setFormError(null);
         if (!clienteNome.trim()) {
-            setFormError('Informe o nome da empresa do cliente.');
+            setFormError('Informe o nome do cliente.');
             return;
         }
-        if (!(0, financeEngine_1.isValidCNPJ)(cnpj)) {
-            setFormError('CNPJ inválido. Verifique os 14 dígitos e os dígitos verificadores.');
+        const docDigits = cnpjCpf.replace(/\D/g, '');
+        if (docDigits.length > 0 && !(0, financeEngine_1.isValidCpfOrCnpj)(cnpjCpf)) {
+            setFormError('CNPJ/CPF inválido. Informe 11 dígitos (CPF) ou 14 dígitos (CNPJ) válidos, ou deixe em branco.');
             return;
         }
         const validItems = items.filter((it) => it.descricao.trim() && it.quantidade > 0);
         if (validItems.length === 0) {
-            setFormError('Adicione pelo menos 1 item válido com descrição e quantidade.');
+            setFormError('Adicione pelo menos 1 serviço com descrição e quantidade maior que zero.');
             return;
         }
-        const contatoCombined = [contatoNome.trim(), contatoTelefone.trim()]
-            .filter(Boolean)
-            .join(' - ');
-        onSaveNote({
-            numero,
-            data: data || (0, financeEngine_1.toISODate)(),
-            empresaId: selectedCompanyId !== 'manual' ? selectedCompanyId : undefined,
-            clienteNome: clienteNome.trim(),
-            cnpj: (0, financeEngine_1.formatCnpjMask)(cnpj),
-            contato: contatoCombined || 'Não informado',
-            endereco: endereco.trim() || undefined,
-            entreguePor: entreguePor.trim() || undefined,
-            osId: selectedOrderId || undefined,
-            status,
-            items: validItems.map((it) => ({
-                ...it,
-                descricao: it.descricao.trim(),
-                total: Math.round(it.quantidade * it.precoUnitario * 100) / 100,
-            })),
-            total: Math.round(validItems.reduce((s, it) => s + it.total, 0) * 100) / 100,
-        }, editingId);
-        setViewMode('list');
+        const normalizedItems = validItems.map((it) => ({
+            ...it,
+            descricao: it.descricao.trim(),
+            total: (0, financeEngine_1.roundCurrencyBRL)(it.quantidade * it.precoUnitario),
+        }));
+        const computedTotal = (0, financeEngine_1.roundCurrencyBRL)(normalizedItems.reduce((s, it) => s + it.total, 0));
+        setIsSaving(true);
+        try {
+            const saved = await onSaveNote({
+                numero,
+                data: dataEntrada || (0, financeEngine_1.toISODate)(),
+                dataSaida: dataSaida || undefined,
+                empresaId: selectedCompanyId !== 'manual' ? selectedCompanyId : undefined,
+                clienteNome: clienteNome.trim(),
+                cnpj: docDigits.length > 0 ? (0, financeEngine_1.formatCpfCnpjMask)(cnpjCpf) : '',
+                inscricao: inscricao.trim() || undefined,
+                contato: fone.trim(),
+                endereco: endereco.trim() || undefined,
+                osId: selectedOrderId || undefined,
+                status,
+                items: normalizedItems,
+                total: computedTotal,
+            }, editingId);
+            if (saved) {
+                setDemoPreviewNote(null);
+                setPreviewNoteId(saved.id);
+                setViewMode('preview');
+            }
+            else {
+                setViewMode('list');
+            }
+        }
+        finally {
+            setIsSaving(false);
+        }
     };
     const filteredNotas = (0, react_1.useMemo)(() => {
         const q = globalSearchQuery.trim().toLowerCase();
         if (!q)
             return notas;
-        return notas.filter((n) => String(n.numero).includes(q) ||
+        return notas.filter((n) => formatPedidoNumber(n.numero).includes(q) ||
+            String(n.numero).includes(q) ||
             n.clienteNome.toLowerCase().includes(q) ||
             n.cnpj.toLowerCase().includes(q) ||
             (n.osId || '').toLowerCase().includes(q));
     }, [notas, globalSearchQuery]);
-    const previewNote = notas.find((n) => n.id === previewNoteId) || null;
+    const previewNote = demoPreviewNote || notas.find((n) => n.id === previewNoteId) || null;
+    const isDemoPreview = previewNote?.id === '__demo_a5__';
+    (0, react_1.useEffect)(() => {
+        if (!onSyncPrintPreview)
+            return;
+        if (viewMode === 'preview' && previewNote) {
+            onSyncPrintPreview({ note: previewNote, emitter });
+        }
+        else if (viewMode === 'form') {
+            onSyncPrintPreview({ note: liveDraftNote, emitter });
+        }
+    }, [viewMode, previewNote, liveDraftNote, emitter, onSyncPrintPreview]);
     const inputClass = 'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
     return (react_1.default.createElement("div", { className: "space-y-5 min-w-0" },
         viewMode === 'list' && (react_1.default.createElement(react_1.default.Fragment, null,
             react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3" },
                 react_1.default.createElement("div", { className: "min-w-0" },
-                    react_1.default.createElement("h2", { className: "text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth" }, "Notas e Canhotos Digitais"),
-                    react_1.default.createElement("p", { className: "text-xs font-medium text-slate-700" }, "Emiss\u00E3o, visualiza\u00E7\u00E3o em tela e impress\u00E3o de canhotos em 1/3 de folha A4.")),
-                react_1.default.createElement("button", { type: "button", onClick: openNewForm, className: "min-h-[44px] bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs sm:text-sm rounded-full px-5 py-2.5 inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30 border border-white/40 cursor-pointer" },
-                    react_1.default.createElement(lucide_react_1.Plus, { className: "w-4 h-4" }),
-                    react_1.default.createElement("span", null, "Nova Nota"))),
+                    react_1.default.createElement("h2", { className: "text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth" }, "Notas e Pedidos (A5)"),
+                    react_1.default.createElement("p", { className: "text-xs font-medium text-slate-700" }, "Pedido imprim\u00EDvel em A5 retrato (148\u00D7210 mm), 15 linhas, preenchimento direto da OS e soma autom\u00E1tica.")),
+                react_1.default.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+                    react_1.default.createElement("button", { type: "button", onClick: openFictitiousDemoPreview, className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer" },
+                        react_1.default.createElement(lucide_react_1.Sparkles, { className: "w-4 h-4 text-indigo-600" }),
+                        react_1.default.createElement("span", null, "Ver Modelo A5")),
+                    react_1.default.createElement("button", { type: "button", onClick: () => setShowEmitterPanel((v) => !v), className: `liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer ${showEmitterPanel
+                            ? 'ring-2 ring-indigo-500/60 text-indigo-800'
+                            : 'text-slate-800'}` },
+                        react_1.default.createElement(lucide_react_1.Settings2, { className: "w-4 h-4 text-indigo-600" }),
+                        react_1.default.createElement("span", null, "Cabe\u00E7alho")),
+                    react_1.default.createElement("button", { type: "button", onClick: openNewForm, className: "min-h-[44px] bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs sm:text-sm rounded-full px-5 py-2.5 inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30 border border-white/40 cursor-pointer" },
+                        react_1.default.createElement(lucide_react_1.Plus, { className: "w-4 h-4" }),
+                        react_1.default.createElement("span", null, "Novo Pedido")))),
+            showEmitterPanel && (react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] p-5 space-y-4" },
+                react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("h3", { className: "text-sm font-extrabold text-slate-900" }, "Dados do Cabe\u00E7alho do Pedido (Prot\u00F3tipo Fict\u00EDcio)"),
+                        react_1.default.createElement("p", { className: "text-[11px] font-medium text-slate-600" }, "Por padr\u00E3o utiliza marca e contatos fict\u00EDcios. Edite aqui se desejar personalizar a impress\u00E3o A5 localmente.")),
+                    react_1.default.createElement("button", { type: "button", onClick: resetEmitterToFictitious, className: "liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" },
+                        react_1.default.createElement(lucide_react_1.RotateCcw, { className: "w-3.5 h-3.5" }),
+                        react_1.default.createElement("span", null, "Restaurar Fict\u00EDcio"))),
+                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Sigla do Logo (at\u00E9 3 letras)"),
+                        react_1.default.createElement("input", { type: "text", maxLength: 3, value: emitter.monogram, onChange: (e) => updateEmitterField('monogram', e.target.value), className: `${inputClass} uppercase font-bold` })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Nome da Empresa"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.brandName, onChange: (e) => updateEmitterField('brandName', e.target.value), className: inputClass })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Subt\u00EDtulo"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.subtitle, onChange: (e) => updateEmitterField('subtitle', e.target.value), className: inputClass }))),
+                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Telefones"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.phone, onChange: (e) => updateEmitterField('phone', e.target.value), className: inputClass })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "E-mail"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.email, onChange: (e) => updateEmitterField('email', e.target.value), className: inputClass })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Site"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.website, onChange: (e) => updateEmitterField('website', e.target.value), className: inputClass }))),
+                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Descri\u00E7\u00E3o (Linha 1)"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.specialtiesLine1, onChange: (e) => updateEmitterField('specialtiesLine1', e.target.value), className: inputClass })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Descri\u00E7\u00E3o (Linha 2)"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.specialtiesLine2, onChange: (e) => updateEmitterField('specialtiesLine2', e.target.value), className: inputClass })),
+                    react_1.default.createElement("div", null,
+                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Endere\u00E7o"),
+                        react_1.default.createElement("input", { type: "text", value: emitter.address, onChange: (e) => updateEmitterField('address', e.target.value), className: inputClass }))))),
             react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] overflow-hidden min-w-0" },
-                react_1.default.createElement("div", { className: "md:hidden divide-y divide-white/55" }, filteredNotas.length === 0 ? (react_1.default.createElement("div", { className: "py-10 px-4 text-center font-medium text-xs text-slate-600" }, "Nenhuma nota emitida ainda. Clique em Nova Nota para criar o primeiro canhoto.")) : (filteredNotas.map((note) => {
+                react_1.default.createElement("div", { className: "md:hidden divide-y divide-white/55" }, filteredNotas.length === 0 ? (react_1.default.createElement("div", { className: "py-10 px-4 text-center space-y-3" },
+                    react_1.default.createElement("p", { className: "font-medium text-xs text-slate-600" }, "Nenhum pedido emitido ainda. Crie um novo pedido a partir de uma OS ou visualize o modelo A5 fict\u00EDcio."),
+                    react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-center gap-2" },
+                        react_1.default.createElement("button", { type: "button", onClick: openFictitiousDemoPreview, className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer" },
+                            react_1.default.createElement(lucide_react_1.Sparkles, { className: "w-4 h-4" }),
+                            react_1.default.createElement("span", null, "Ver Modelo A5")),
+                        react_1.default.createElement("button", { type: "button", onClick: openNewForm, className: "min-h-[44px] px-4 py-2 rounded-full text-xs font-bold bg-indigo-600 text-white inline-flex items-center gap-1.5 cursor-pointer" },
+                            react_1.default.createElement(lucide_react_1.Plus, { className: "w-4 h-4" }),
+                            react_1.default.createElement("span", null, "Novo Pedido"))))) : (filteredNotas.map((note) => {
                     const stMeta = NOTE_STATUS_META[note.status];
                     return (react_1.default.createElement("div", { key: note.id, className: "p-4 space-y-2.5 text-xs min-w-0" },
                         react_1.default.createElement("div", { className: "flex items-start justify-between gap-2 min-w-0" },
                             react_1.default.createElement("div", { className: "min-w-0" },
-                                react_1.default.createElement("span", { className: "font-mono font-extrabold text-indigo-700 block" },
-                                    "N\u00BA ",
-                                    String(note.numero).padStart(4, '0')),
-                                react_1.default.createElement("span", { className: "font-bold text-slate-900 break-words" }, note.clienteNome)),
+                                react_1.default.createElement("div", { className: "flex items-center gap-2" },
+                                    react_1.default.createElement("span", { className: "font-mono font-extrabold text-rose-700" },
+                                        "PEDIDO ",
+                                        formatPedidoNumber(note.numero)),
+                                    note.osId && (react_1.default.createElement("span", { className: "px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-800 border border-indigo-300/60" }, note.osId))),
+                                react_1.default.createElement("span", { className: "font-bold text-slate-900 break-words block mt-0.5" }, note.clienteNome)),
                             react_1.default.createElement("span", { className: "font-mono font-black text-base text-slate-900 shrink-0" }, (0, financeEngine_1.formatBRL)(note.total))),
                         react_1.default.createElement("div", { className: "grid grid-cols-2 gap-2" },
                             react_1.default.createElement("div", null,
-                                react_1.default.createElement("span", { className: "text-slate-500 font-semibold block" }, "Data"),
-                                react_1.default.createElement("span", { className: "font-mono text-slate-800" }, (0, financeEngine_1.formatDateBR)(note.data))),
+                                react_1.default.createElement("span", { className: "text-slate-500 font-semibold block" }, "Entrada / Sa\u00EDda"),
+                                react_1.default.createElement("span", { className: "font-mono text-slate-800" },
+                                    (0, financeEngine_1.formatDateBR)(note.data),
+                                    note.dataSaida
+                                        ? ` → ${(0, financeEngine_1.formatDateBR)(note.dataSaida)}`
+                                        : '')),
                             react_1.default.createElement("div", null,
                                 react_1.default.createElement("span", { className: "text-slate-500 font-semibold block" }, "Status"),
                                 react_1.default.createElement("span", { className: `inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${stMeta.badgeClass}` }, stMeta.label)),
                             note.cnpj && (react_1.default.createElement("div", { className: "col-span-2" },
-                                react_1.default.createElement("span", { className: "text-slate-500 font-semibold block" }, "CNPJ"),
+                                react_1.default.createElement("span", { className: "text-slate-500 font-semibold block" }, "CNPJ/CPF"),
                                 react_1.default.createElement("span", { className: "font-mono text-slate-700" }, note.cnpj)))),
                         react_1.default.createElement("div", { className: "flex flex-wrap items-center gap-2 pt-1" },
                             react_1.default.createElement("button", { type: "button", onClick: () => {
+                                    setDemoPreviewNote(null);
                                     setPreviewNoteId(note.id);
                                     setViewMode('preview');
                                 }, className: "liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer" },
@@ -7151,175 +7948,245 @@ const NotesSection = ({ notas, companies, orders, nextNoteNumber, tenantName, gl
                                 react_1.default.createElement("span", null, "Editar")),
                             react_1.default.createElement("button", { type: "button", onClick: () => {
                                     onMarkNotePrinted(note.id);
-                                    onTriggerPrint(note, false);
+                                    onTriggerPrint(note, emitter);
                                 }, className: "min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1.5 cursor-pointer" },
                                 react_1.default.createElement(lucide_react_1.Printer, { className: "w-4 h-4" }),
-                                react_1.default.createElement("span", null, "Imprimir")),
-                            react_1.default.createElement("button", { type: "button", onClick: () => onDeleteNote(note.id), "aria-label": "Excluir nota", className: "min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center cursor-pointer", title: "Excluir nota" },
+                                react_1.default.createElement("span", null, "Imprimir A5")),
+                            react_1.default.createElement("button", { type: "button", onClick: () => onDeleteNote(note.id), "aria-label": "Excluir pedido", className: "min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center cursor-pointer", title: "Excluir pedido" },
                                 react_1.default.createElement(lucide_react_1.Trash2, { className: "w-4 h-4" })))));
                 }))),
                 react_1.default.createElement("div", { className: "hidden md:block overflow-x-auto" },
                     react_1.default.createElement("table", { className: "w-full text-left border-collapse" },
                         react_1.default.createElement("thead", null,
                             react_1.default.createElement("tr", { className: "text-[11px] uppercase tracking-wider text-slate-600 border-b border-white/60 bg-white/30" },
-                                react_1.default.createElement("th", { className: "py-3.5 px-5 font-extrabold" }, "N\u00FAmero"),
+                                react_1.default.createElement("th", { className: "py-3.5 px-5 font-extrabold" }, "Pedido"),
                                 react_1.default.createElement("th", { className: "py-3.5 px-4 font-extrabold" }, "Cliente"),
-                                react_1.default.createElement("th", { className: "py-3.5 px-4 font-extrabold" }, "Data"),
+                                react_1.default.createElement("th", { className: "py-3.5 px-4 font-extrabold" }, "Entrada / Sa\u00EDda"),
                                 react_1.default.createElement("th", { className: "py-3.5 px-4 text-right font-extrabold" }, "Total"),
                                 react_1.default.createElement("th", { className: "py-3.5 px-4 font-extrabold" }, "Status"),
                                 react_1.default.createElement("th", { className: "py-3.5 px-5 text-right font-extrabold" }, "A\u00E7\u00F5es"))),
                         react_1.default.createElement("tbody", { className: "divide-y divide-white/45 text-xs" }, filteredNotas.length === 0 ? (react_1.default.createElement("tr", null,
-                            react_1.default.createElement("td", { colSpan: 6, className: "py-12 text-center font-medium text-slate-600" }, "Nenhuma nota emitida ainda. Clique em Nova Nota para criar o primeiro canhoto."))) : (filteredNotas.map((note) => {
+                            react_1.default.createElement("td", { colSpan: 6, className: "py-12 px-6 text-center space-y-3" },
+                                react_1.default.createElement("p", { className: "font-medium text-slate-600" },
+                                    "Nenhum pedido emitido ainda. Clique em",
+                                    ' ',
+                                    react_1.default.createElement("strong", null, "Novo Pedido"),
+                                    " para preencher com dados da OS ou clique em ",
+                                    react_1.default.createElement("strong", null, "Ver Modelo A5"),
+                                    " para visualizar o prot\u00F3tipo imprim\u00EDvel."),
+                                react_1.default.createElement("div", { className: "inline-flex items-center gap-2 pt-1" },
+                                    react_1.default.createElement("button", { type: "button", onClick: openFictitiousDemoPreview, className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer" },
+                                        react_1.default.createElement(lucide_react_1.Sparkles, { className: "w-4 h-4" }),
+                                        react_1.default.createElement("span", null, "Ver Modelo A5 (Fict\u00EDcio)")),
+                                    react_1.default.createElement("button", { type: "button", onClick: openNewForm, className: "min-h-[44px] px-4 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1.5 cursor-pointer" },
+                                        react_1.default.createElement(lucide_react_1.Plus, { className: "w-4 h-4" }),
+                                        react_1.default.createElement("span", null, "Novo Pedido")))))) : (filteredNotas.map((note) => {
                             const stMeta = NOTE_STATUS_META[note.status];
                             return (react_1.default.createElement("tr", { key: note.id, className: "hover:bg-white/35 transition-colors" },
-                                react_1.default.createElement("td", { className: "py-4 px-5 font-mono font-extrabold text-indigo-700 whitespace-nowrap" },
-                                    "N\u00BA ",
-                                    String(note.numero).padStart(4, '0')),
+                                react_1.default.createElement("td", { className: "py-4 px-5 whitespace-nowrap" },
+                                    react_1.default.createElement("span", { className: "font-mono font-extrabold text-rose-700 block" },
+                                        "N\u00BA ",
+                                        formatPedidoNumber(note.numero)),
+                                    note.osId && (react_1.default.createElement("span", { className: "text-[10px] font-bold text-indigo-700" }, note.osId))),
                                 react_1.default.createElement("td", { className: "py-4 px-4" },
                                     react_1.default.createElement("span", { className: "font-bold text-slate-900 block" }, note.clienteNome),
-                                    react_1.default.createElement("span", { className: "text-[11px] font-mono text-slate-600" }, note.cnpj)),
-                                react_1.default.createElement("td", { className: "py-4 px-4 font-mono text-slate-800 whitespace-nowrap" }, (0, financeEngine_1.formatDateBR)(note.data)),
+                                    react_1.default.createElement("span", { className: "text-[11px] font-mono text-slate-600" }, note.cnpj || note.contato || '—')),
+                                react_1.default.createElement("td", { className: "py-4 px-4 font-mono text-slate-800 whitespace-nowrap" },
+                                    react_1.default.createElement("div", null, (0, financeEngine_1.formatDateBR)(note.data)),
+                                    note.dataSaida && (react_1.default.createElement("div", { className: "text-[11px] text-slate-500" },
+                                        "Sa\u00EDda: ",
+                                        (0, financeEngine_1.formatDateBR)(note.dataSaida)))),
                                 react_1.default.createElement("td", { className: "py-4 px-4 text-right font-mono font-black text-slate-900 whitespace-nowrap" }, (0, financeEngine_1.formatBRL)(note.total)),
                                 react_1.default.createElement("td", { className: "py-4 px-4 whitespace-nowrap" },
                                     react_1.default.createElement("span", { className: `px-2.5 py-1 rounded-full text-[11px] font-bold border ${stMeta.badgeClass}` }, stMeta.label)),
                                 react_1.default.createElement("td", { className: "py-4 px-5 text-right whitespace-nowrap" },
                                     react_1.default.createElement("div", { className: "inline-flex items-center gap-1.5" },
                                         react_1.default.createElement("button", { type: "button", onClick: () => {
+                                                setDemoPreviewNote(null);
                                                 setPreviewNoteId(note.id);
                                                 setViewMode('preview');
-                                            }, className: "liquid-glass-pill px-3 py-1.5 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1 cursor-pointer" },
+                                            }, className: "liquid-glass-pill min-h-[38px] px-3 py-1.5 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1 cursor-pointer" },
                                             react_1.default.createElement(lucide_react_1.Eye, { className: "w-3.5 h-3.5 text-indigo-600" }),
                                             react_1.default.createElement("span", null, "Visualizar")),
-                                        react_1.default.createElement("button", { type: "button", onClick: () => openEditForm(note), className: "liquid-glass-pill px-3 py-1.5 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1 cursor-pointer" },
+                                        react_1.default.createElement("button", { type: "button", onClick: () => openEditForm(note), className: "liquid-glass-pill min-h-[38px] px-3 py-1.5 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1 cursor-pointer" },
                                             react_1.default.createElement(lucide_react_1.Edit3, { className: "w-3.5 h-3.5 text-indigo-600" }),
                                             react_1.default.createElement("span", null, "Editar")),
                                         react_1.default.createElement("button", { type: "button", onClick: () => {
                                                 onMarkNotePrinted(note.id);
-                                                onTriggerPrint(note, false);
-                                            }, className: "px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 cursor-pointer" },
+                                                onTriggerPrint(note, emitter);
+                                            }, className: "min-h-[38px] px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 cursor-pointer" },
                                             react_1.default.createElement(lucide_react_1.Printer, { className: "w-3.5 h-3.5" }),
-                                            react_1.default.createElement("span", null, "Imprimir")),
-                                        react_1.default.createElement("button", { type: "button", onClick: () => onDeleteNote(note.id), className: "p-1.5 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 cursor-pointer", title: "Excluir nota" },
+                                            react_1.default.createElement("span", null, "Imprimir A5")),
+                                        react_1.default.createElement("button", { type: "button", onClick: () => onDeleteNote(note.id), className: "p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 cursor-pointer", title: "Excluir pedido", "aria-label": "Excluir pedido" },
                                             react_1.default.createElement(lucide_react_1.Trash2, { className: "w-3.5 h-3.5" }))))));
                         })))))))),
-        viewMode === 'form' && (react_1.default.createElement("form", { onSubmit: handleSubmit, className: "space-y-5" },
+        viewMode === 'form' && (react_1.default.createElement("form", { onSubmit: handleSubmit, className: "space-y-5 min-w-0" },
             react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3" },
-                react_1.default.createElement("div", { className: "flex items-center gap-3" },
-                    react_1.default.createElement("button", { type: "button", onClick: () => setViewMode('list'), className: "liquid-glass-pill p-2.5 rounded-full text-slate-800 cursor-pointer" },
+                react_1.default.createElement("div", { className: "flex items-center gap-3 min-w-0" },
+                    react_1.default.createElement("button", { type: "button", onClick: () => setViewMode('list'), className: "liquid-glass-pill min-h-[44px] min-w-[44px] rounded-full text-slate-800 inline-flex items-center justify-center cursor-pointer shrink-0", "aria-label": "Voltar para lista" },
                         react_1.default.createElement(lucide_react_1.ArrowLeft, { className: "w-4 h-4" })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("h2", { className: "text-lg font-extrabold text-slate-900 frosted-text-depth" }, editingId
-                            ? `Editar Nota Nº ${String(numero).padStart(4, '0')}`
-                            : `Nova Nota Nº ${String(numero).padStart(4, '0')}`),
-                        react_1.default.createElement("p", { className: "text-xs font-medium text-slate-700" }, "Preencha manualmente ou importe direto de uma OS existente"))),
-                react_1.default.createElement("div", { className: "w-full sm:w-80" },
-                    react_1.default.createElement("select", { value: selectedOrderId, onChange: (e) => handleImportFromOrder(e.target.value), className: inputClass },
+                    react_1.default.createElement("div", { className: "min-w-0" },
+                        react_1.default.createElement("h2", { className: "text-lg font-extrabold text-slate-900 frosted-text-depth truncate" }, editingId
+                            ? `Editar Pedido Nº ${formatPedidoNumber(numero)}`
+                            : `Novo Pedido Nº ${formatPedidoNumber(numero)}`),
+                        react_1.default.createElement("p", { className: "text-xs font-medium text-slate-700" }, "Importe os dados direto de uma OS ou preencha os campos do pedido A5 (148\u00D7210 mm)."))),
+                react_1.default.createElement("div", { className: "flex flex-wrap items-center gap-2 w-full sm:w-auto" },
+                    react_1.default.createElement("select", { value: selectedOrderId, onChange: (e) => handleImportFromOrder(e.target.value), "aria-label": "Importar de OS existente", className: `${inputClass} sm:w-72` },
                         react_1.default.createElement("option", { value: "" }, "Importar de OS existente..."),
                         orders.map((o) => (react_1.default.createElement("option", { key: o.id, value: o.id },
                             o.id,
-                            " - ",
+                            " \u2014 ",
                             o.companyName,
-                            " - ",
-                            o.toolDescription)))))),
+                            " \u2014 ",
+                            (0, financeEngine_1.formatBRL)(o.amount))))),
+                    react_1.default.createElement("button", { type: "button", onClick: handleFillFictitiousInForm, className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer shrink-0" },
+                        react_1.default.createElement(lucide_react_1.Sparkles, { className: "w-4 h-4" }),
+                        react_1.default.createElement("span", null, "Dados Fict\u00EDcios")))),
             formError && (react_1.default.createElement("div", { className: "p-3.5 rounded-2xl bg-rose-500/15 border border-rose-300/70 text-rose-800 text-xs font-bold flex items-center gap-2" },
                 react_1.default.createElement(lucide_react_1.AlertCircle, { className: "w-4 h-4 shrink-0" }),
                 react_1.default.createElement("span", null, formError))),
-            react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] p-6 space-y-4" },
-                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-4 gap-3" },
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "N\u00FAmero da Nota"),
-                        react_1.default.createElement("input", { type: "text", readOnly: true, value: `Nº ${String(numero).padStart(4, '0')}`, className: `${inputClass} font-mono font-extrabold bg-white/60` })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Data de Emiss\u00E3o"),
-                        react_1.default.createElement("input", { type: "date", required: true, value: data, onChange: (e) => setData(e.target.value), className: `${inputClass} font-mono` })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Empresa Cadastrada"),
-                        react_1.default.createElement("select", { value: selectedCompanyId, onChange: (e) => handleCompanySelect(e.target.value), className: inputClass },
-                            react_1.default.createElement("option", { value: "manual" }, "Digitar cliente manualmente"),
-                            companies.map((c) => (react_1.default.createElement("option", { key: c.id, value: c.id }, c.corporateName))))),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Status"),
-                        react_1.default.createElement("select", { value: status, onChange: (e) => setStatus(e.target.value), className: inputClass }, Object.entries(NOTE_STATUS_META).map(([k, v]) => (react_1.default.createElement("option", { key: k, value: k }, v.label)))))),
-                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Raz\u00E3o Social / Cliente"),
-                        react_1.default.createElement("input", { type: "text", required: true, value: clienteNome, onChange: (e) => setClienteNome(e.target.value), placeholder: "Nome da empresa cliente", className: inputClass })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "CNPJ"),
-                        react_1.default.createElement("input", { type: "text", required: true, value: cnpj, onChange: (e) => setCnpj((0, financeEngine_1.formatCnpjMask)(e.target.value)), placeholder: "00.000.000/0000-00", className: `${inputClass} font-mono` })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Entregue por"),
-                        react_1.default.createElement("input", { type: "text", value: entreguePor, onChange: (e) => setEntreguePor(e.target.value), placeholder: "Nome do motorista ou portador", className: inputClass }))),
-                react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Contato"),
-                        react_1.default.createElement("input", { type: "text", value: contatoNome, onChange: (e) => setContatoNome(e.target.value), placeholder: "Nome do contato", className: inputClass })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Telefone"),
-                        react_1.default.createElement("input", { type: "text", value: contatoTelefone, onChange: (e) => setContatoTelefone((0, financeEngine_1.formatPhoneMask)(e.target.value)), placeholder: "(00) 00000-0000", className: `${inputClass} font-mono` })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Endere\u00E7o"),
-                        react_1.default.createElement("input", { type: "text", value: endereco, onChange: (e) => setEndereco(e.target.value), placeholder: "Rua, n\u00FAmero e bairro", className: inputClass })))),
-            react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] p-6 space-y-4" },
-                react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("h3", { className: "text-sm font-extrabold text-slate-900" }, "Itens da Nota"),
-                        react_1.default.createElement("p", { className: "text-[11px] font-medium text-slate-600" }, "At\u00E9 6 linhas por canhoto de 1/3 A4. Acima de 6 linhas gera canhotos adicionais automaticamente.")),
-                    react_1.default.createElement("button", { type: "button", onClick: handleAddRow, className: "liquid-glass-pill px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer" },
-                        react_1.default.createElement(lucide_react_1.Plus, { className: "w-3.5 h-3.5" }),
-                        react_1.default.createElement("span", null, "Adicionar linha"))),
-                items.length > 6 && (react_1.default.createElement("div", { className: "p-3 rounded-2xl bg-indigo-500/10 border border-indigo-300/60 text-xs font-bold text-indigo-800" },
-                    "Esta nota possui ",
-                    items.length,
-                    " linhas e ser\u00E1 dividida automaticamente em ",
-                    Math.ceil(items.length / 6),
-                    " canhotos na visualiza\u00E7\u00E3o e impress\u00E3o.")),
-                react_1.default.createElement("div", { className: "space-y-2.5" }, items.map((row, idx) => (react_1.default.createElement("div", { key: row.id, className: "grid grid-cols-1 md:grid-cols-12 gap-2.5 items-center p-3 rounded-2xl liquid-glass-subtle" },
-                    react_1.default.createElement("div", { className: "md:col-span-6" },
-                        react_1.default.createElement("input", { type: "text", required: true, value: row.descricao, onChange: (e) => updateRow(idx, 'descricao', e.target.value), placeholder: "Descri\u00E7\u00E3o do item ou faca", className: inputClass })),
-                    react_1.default.createElement("div", { className: "md:col-span-2" },
-                        react_1.default.createElement("input", { type: "number", step: "0.01", min: "0.01", required: true, value: row.quantidade, onChange: (e) => updateRow(idx, 'quantidade', e.target.value), placeholder: "Qtd.", className: `${inputClass} font-mono text-right` })),
-                    react_1.default.createElement("div", { className: "md:col-span-2" },
-                        react_1.default.createElement("input", { type: "number", step: "0.01", min: "0", required: true, value: row.precoUnitario, onChange: (e) => updateRow(idx, 'precoUnitario', e.target.value), placeholder: "Unit\u00E1rio R$", className: `${inputClass} font-mono text-right` })),
-                    react_1.default.createElement("div", { className: "md:col-span-2 flex items-center justify-between gap-2" },
-                        react_1.default.createElement("span", { className: "font-mono text-xs font-extrabold text-slate-900" }, (0, financeEngine_1.formatBRL)(row.total)),
-                        react_1.default.createElement("button", { type: "button", onClick: () => handleRemoveRow(idx), disabled: items.length <= 1, className: "p-1.5 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-40 text-slate-500 hover:text-rose-700 cursor-pointer", title: "Remover linha" },
-                            react_1.default.createElement(lucide_react_1.Trash2, { className: "w-3.5 h-3.5" }))))))),
-                react_1.default.createElement("div", { className: "pt-3 border-t border-white/60 flex flex-wrap items-center justify-between gap-3" },
-                    react_1.default.createElement("div", { className: "text-sm font-black text-slate-900 font-mono" },
-                        "Total Geral: ",
-                        (0, financeEngine_1.formatBRL)(tableTotal)),
-                    react_1.default.createElement("button", { type: "submit", className: "px-6 py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border border-white/40 shadow-lg inline-flex items-center gap-2 cursor-pointer" },
-                        react_1.default.createElement(lucide_react_1.Check, { className: "w-4 h-4" }),
-                        react_1.default.createElement("span", null, editingId ? 'Salvar Nota' : 'Emitir Nota')))))),
-        viewMode === 'preview' && previewNote && (react_1.default.createElement("div", { className: "space-y-4" },
+            react_1.default.createElement("div", { className: "grid grid-cols-1 xl:grid-cols-12 gap-5 items-start min-w-0" },
+                react_1.default.createElement("div", { className: "xl:col-span-6 space-y-5 min-w-0" },
+                    react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4" },
+                        react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "N\u00BA do Pedido (Auto)"),
+                                react_1.default.createElement("input", { type: "text", readOnly: true, value: formatPedidoNumber(numero), className: `${inputClass} font-mono font-extrabold text-rose-700 bg-white/60` })),
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Empresa Cadastrada"),
+                                react_1.default.createElement("select", { value: selectedCompanyId, onChange: (e) => handleCompanySelect(e.target.value), className: inputClass },
+                                    react_1.default.createElement("option", { value: "manual" }, "Preenchimento manual"),
+                                    companies.map((c) => (react_1.default.createElement("option", { key: c.id, value: c.id }, c.corporateName))))),
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Status"),
+                                react_1.default.createElement("select", { value: status, onChange: (e) => setStatus(e.target.value), className: inputClass }, Object.entries(NOTE_STATUS_META).map(([k, v]) => (react_1.default.createElement("option", { key: k, value: k }, v.label)))))),
+                        react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-12 gap-3" },
+                            react_1.default.createElement("div", { className: "sm:col-span-7" },
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Cliente *"),
+                                react_1.default.createElement("input", { type: "text", required: true, value: clienteNome, onChange: (e) => setClienteNome(e.target.value), placeholder: "Nome ou raz\u00E3o social do cliente", className: inputClass })),
+                            react_1.default.createElement("div", { className: "sm:col-span-5" },
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Fone"),
+                                react_1.default.createElement("input", { type: "text", value: fone, onChange: (e) => setFone((0, financeEngine_1.formatPhoneMask)(e.target.value)), placeholder: "(00) 00000-0000", className: `${inputClass} font-mono` }))),
+                        react_1.default.createElement("div", null,
+                            react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Endere\u00E7o"),
+                            react_1.default.createElement("input", { type: "text", value: endereco, onChange: (e) => setEndereco(e.target.value), placeholder: "Rua, n\u00FAmero, bairro, cidade - UF", className: inputClass })),
+                        react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "CNPJ/CPF"),
+                                react_1.default.createElement("input", { type: "text", value: cnpjCpf, onChange: (e) => setCnpjCpf((0, financeEngine_1.formatCpfCnpjMask)(e.target.value)), placeholder: "00.000.000/0000-00 ou 000.000.000-00", className: `${inputClass} font-mono` })),
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Inscri\u00E7\u00E3o"),
+                                react_1.default.createElement("input", { type: "text", value: inscricao, onChange: (e) => setInscricao(e.target.value), placeholder: "Inscri\u00E7\u00E3o Estadual ou ISENTO", className: inputClass }))),
+                        react_1.default.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Data entrada *"),
+                                react_1.default.createElement("input", { type: "date", required: true, value: dataEntrada, onChange: (e) => setDataEntrada(e.target.value), className: `${inputClass} font-mono` })),
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("label", { className: "text-xs font-bold text-slate-700 block mb-1" }, "Data sa\u00EDda"),
+                                react_1.default.createElement("input", { type: "date", value: dataSaida, onChange: (e) => setDataSaida(e.target.value), className: `${inputClass} font-mono` })))),
+                    react_1.default.createElement("div", { className: "liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4" },
+                        react_1.default.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("h3", { className: "text-sm font-extrabold text-slate-900" },
+                                    "Servi\u00E7os do Pedido (",
+                                    items.length,
+                                    "/",
+                                    exports.PEDIDO_A5_ROWS,
+                                    ' ',
+                                    "linhas)"),
+                                react_1.default.createElement("p", { className: "text-[11px] font-medium text-slate-600" }, "A folha A5 exibe 15 linhas fixas com soma autom\u00E1tica no canto inferior direito.")),
+                            react_1.default.createElement("button", { type: "button", onClick: handleAddRow, className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer" },
+                                react_1.default.createElement(lucide_react_1.Plus, { className: "w-4 h-4" }),
+                                react_1.default.createElement("span", null, "Adicionar linha"))),
+                        orders.length > 0 && (react_1.default.createElement("div", null,
+                            react_1.default.createElement("select", { value: "", onChange: (e) => {
+                                    handleAppendOrderAsItem(e.target.value);
+                                }, className: inputClass, "aria-label": "Adicionar outra OS como linha de servi\u00E7o" },
+                                react_1.default.createElement("option", { value: "" }, "+ Incluir servi\u00E7o de outra OS na tabela..."),
+                                orders.map((o) => (react_1.default.createElement("option", { key: o.id, value: o.id },
+                                    "+ ",
+                                    o.id,
+                                    " \u2014 ",
+                                    o.toolDescription,
+                                    " (",
+                                    (0, financeEngine_1.formatBRL)(o.amount),
+                                    ")")))))),
+                        items.length > exports.PEDIDO_A5_ROWS && (react_1.default.createElement("div", { className: "p-3 rounded-2xl bg-indigo-500/10 border border-indigo-300/60 text-xs font-bold text-indigo-800" },
+                            "Este pedido possui ",
+                            items.length,
+                            " itens e ser\u00E1 paginado automaticamente em",
+                            ' ',
+                            Math.ceil(items.length / exports.PEDIDO_A5_ROWS),
+                            " folhas A5 na impress\u00E3o.")),
+                        react_1.default.createElement("div", { className: "space-y-2.5" }, items.map((row, idx) => (react_1.default.createElement("div", { key: row.id, className: "grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center p-3 rounded-2xl liquid-glass-subtle" },
+                            react_1.default.createElement("div", { className: "sm:col-span-2" },
+                                react_1.default.createElement("label", { className: "text-[11px] font-bold text-slate-600 block mb-0.5 sm:hidden" }, "Quant."),
+                                react_1.default.createElement("input", { type: "number", step: "0.01", min: "0.01", required: true, value: row.quantidade, onChange: (e) => updateRow(idx, 'quantidade', e.target.value), placeholder: "Qtd.", title: "Quantidade", className: `${inputClass} font-mono text-right` })),
+                            react_1.default.createElement("div", { className: "sm:col-span-5" },
+                                react_1.default.createElement("label", { className: "text-[11px] font-bold text-slate-600 block mb-0.5 sm:hidden" }, "Descri\u00E7\u00E3o dos servi\u00E7os"),
+                                react_1.default.createElement("input", { type: "text", required: true, value: row.descricao, onChange: (e) => updateRow(idx, 'descricao', e.target.value), placeholder: "Descri\u00E7\u00E3o do servi\u00E7o / faca", className: inputClass })),
+                            react_1.default.createElement("div", { className: "sm:col-span-3" },
+                                react_1.default.createElement("label", { className: "text-[11px] font-bold text-slate-600 block mb-0.5 sm:hidden" }, "Valor unit. (R$)"),
+                                react_1.default.createElement("input", { type: "number", step: "0.01", min: "0", required: true, value: row.precoUnitario, onChange: (e) => updateRow(idx, 'precoUnitario', e.target.value), placeholder: "Valor R$", title: "Valor unit\u00E1rio (R$)", className: `${inputClass} font-mono text-right` })),
+                            react_1.default.createElement("div", { className: "sm:col-span-2 flex items-center justify-between sm:justify-end gap-2" },
+                                react_1.default.createElement("span", { className: "font-mono text-xs font-extrabold text-slate-900 whitespace-nowrap", title: "Total da linha" }, (0, financeEngine_1.formatBRL)(row.total)),
+                                react_1.default.createElement("button", { type: "button", onClick: () => handleRemoveRow(idx), disabled: items.length <= 1, className: "min-h-[40px] min-w-[40px] rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-40 text-slate-500 hover:text-rose-700 inline-flex items-center justify-center cursor-pointer shrink-0", title: "Remover linha", "aria-label": "Remover linha" },
+                                    react_1.default.createElement(lucide_react_1.Trash2, { className: "w-3.5 h-3.5" }))))))),
+                        react_1.default.createElement("div", { className: "pt-3 border-t border-white/60 flex flex-wrap items-center justify-between gap-3" },
+                            react_1.default.createElement("div", null,
+                                react_1.default.createElement("span", { className: "text-[11px] font-bold uppercase text-slate-500 block" }, "Total Autom\u00E1tico"),
+                                react_1.default.createElement("span", { className: "text-base font-black text-slate-900 font-mono" }, (0, financeEngine_1.formatBRL)(tableTotal))),
+                            react_1.default.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+                                react_1.default.createElement("button", { type: "button", onClick: () => onTriggerPrint(liveDraftNote, emitter), className: "liquid-glass-pill min-h-[44px] px-4 py-2.5 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer" },
+                                    react_1.default.createElement(lucide_react_1.Printer, { className: "w-4 h-4 text-indigo-600" }),
+                                    react_1.default.createElement("span", null, "Imprimir Pr\u00E9via")),
+                                react_1.default.createElement("button", { type: "submit", disabled: isSaving, className: "min-h-[44px] px-6 py-2.5 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 text-white border border-white/40 shadow-lg inline-flex items-center gap-2 cursor-pointer" },
+                                    react_1.default.createElement(lucide_react_1.Check, { className: "w-4 h-4" }),
+                                    react_1.default.createElement("span", null, isSaving
+                                        ? 'Salvando...'
+                                        : editingId
+                                            ? 'Salvar Pedido'
+                                            : 'Emitir Pedido')))))),
+                react_1.default.createElement("div", { className: "xl:col-span-6 space-y-3 min-w-0 xl:sticky xl:top-5" },
+                    react_1.default.createElement("div", { className: "liquid-glass rounded-[24px] px-4 py-3 flex items-center justify-between gap-2" },
+                        react_1.default.createElement("div", { className: "flex items-center gap-2 min-w-0" },
+                            react_1.default.createElement(lucide_react_1.FileText, { className: "w-4 h-4 text-indigo-600 shrink-0" }),
+                            react_1.default.createElement("span", { className: "text-xs font-extrabold text-slate-900 truncate" }, "Pr\u00E9via em Tempo Real \u2014 A5 Retrato (148\u00D7210 mm)")),
+                        react_1.default.createElement("span", { className: "text-[11px] font-mono font-bold text-rose-700 shrink-0" },
+                            "N\u00BA ",
+                            formatPedidoNumber(numero))),
+                    react_1.default.createElement("div", { className: "space-y-4" }, chunkNoteItems(liveDraftNote.items, exports.PEDIDO_A5_ROWS).map((chunk, idx, arr) => (react_1.default.createElement(exports.PedidoA5Sheet, { key: `live-a5-${idx}`, note: liveDraftNote, itemsChunk: chunk, pageIndex: idx, totalPages: arr.length, emitter: emitter })))))))),
+        viewMode === 'preview' && previewNote && (react_1.default.createElement("div", { className: "space-y-4 min-w-0" },
             react_1.default.createElement("div", { className: "liquid-glass rounded-[24px] p-4 flex flex-wrap items-center justify-between gap-3" },
-                react_1.default.createElement("div", { className: "flex items-center gap-3" },
-                    react_1.default.createElement("button", { type: "button", onClick: () => setViewMode('list'), className: "liquid-glass-pill p-2.5 rounded-full text-slate-800 cursor-pointer" },
+                react_1.default.createElement("div", { className: "flex items-center gap-3 min-w-0" },
+                    react_1.default.createElement("button", { type: "button", onClick: () => {
+                            setDemoPreviewNote(null);
+                            setViewMode('list');
+                        }, className: "liquid-glass-pill min-h-[44px] min-w-[44px] rounded-full text-slate-800 inline-flex items-center justify-center cursor-pointer shrink-0", "aria-label": "Voltar" },
                         react_1.default.createElement(lucide_react_1.ArrowLeft, { className: "w-4 h-4" })),
-                    react_1.default.createElement("div", null,
-                        react_1.default.createElement("h3", { className: "text-sm font-extrabold text-slate-900 flex items-center gap-2" },
-                            react_1.default.createElement(lucide_react_1.FileText, { className: "w-4 h-4 text-indigo-600" }),
-                            "Visualiza\u00E7\u00E3o do Canhoto N\u00BA ",
-                            String(previewNote.numero).padStart(4, '0')),
-                        react_1.default.createElement("p", { className: "text-[11px] font-medium text-slate-600" }, "Propor\u00E7\u00E3o 210:99 mm \u2022 1/3 de folha A4"))),
+                    react_1.default.createElement("div", { className: "min-w-0" },
+                        react_1.default.createElement("h3", { className: "text-sm font-extrabold text-slate-900 flex items-center gap-2 flex-wrap" },
+                            react_1.default.createElement(lucide_react_1.FileText, { className: "w-4 h-4 text-indigo-600 shrink-0" }),
+                            react_1.default.createElement("span", null, isDemoPreview
+                                ? `Modelo Fictício — Pedido Nº ${formatPedidoNumber(previewNote.numero)}`
+                                : `Pedido Nº ${formatPedidoNumber(previewNote.numero)}`)),
+                        react_1.default.createElement("p", { className: "text-[11px] font-medium text-slate-600" },
+                            "Formato A5 Retrato (148 \u00D7 210 mm) \u2022 15 linhas \u2022 Total autom\u00E1tico (",
+                            (0, financeEngine_1.formatBRL)(previewNote.total),
+                            ")"))),
                 react_1.default.createElement("div", { className: "flex flex-wrap items-center gap-2" },
-                    react_1.default.createElement("button", { type: "button", onClick: () => openEditForm(previewNote), className: "liquid-glass-pill px-4 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer" },
-                        react_1.default.createElement(lucide_react_1.Edit3, { className: "w-3.5 h-3.5" }),
-                        react_1.default.createElement("span", null, "Editar")),
+                    react_1.default.createElement("button", { type: "button", onClick: () => openEditForm(previewNote), className: "liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer" },
+                        react_1.default.createElement(lucide_react_1.Edit3, { className: "w-4 h-4 text-indigo-600" }),
+                        react_1.default.createElement("span", null, isDemoPreview ? 'Editar / Salvar' : 'Editar')),
                     react_1.default.createElement("button", { type: "button", onClick: () => {
-                            onMarkNotePrinted(previewNote.id);
-                            onTriggerPrint(previewNote, false);
-                        }, className: "px-4 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md inline-flex items-center gap-1.5 cursor-pointer" },
-                        react_1.default.createElement(lucide_react_1.Printer, { className: "w-3.5 h-3.5" }),
-                        react_1.default.createElement("span", null, "Imprimir")),
-                    react_1.default.createElement("button", { type: "button", onClick: () => {
-                            onMarkNotePrinted(previewNote.id);
-                            onTriggerPrint(previewNote, true);
-                        }, className: "px-4 py-2 rounded-full text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-md inline-flex items-center gap-1.5 cursor-pointer" },
-                        react_1.default.createElement(lucide_react_1.Printer, { className: "w-3.5 h-3.5" }),
-                        react_1.default.createElement("span", null, "Imprimir 3 por folha")))),
-            react_1.default.createElement("div", { className: "max-w-4xl mx-auto space-y-4" }, chunkNoteItems(previewNote.items, 6).map((chunk, idx, arr) => (react_1.default.createElement(exports.CanhotoSlipCard, { key: `${previewNote.id}-slip-${idx}`, note: previewNote, itemsChunk: chunk, slipIndex: idx, totalSlips: arr.length, tenantName: tenantName }))))))));
+                            if (!isDemoPreview) {
+                                onMarkNotePrinted(previewNote.id);
+                            }
+                            onTriggerPrint(previewNote, emitter);
+                        }, className: "min-h-[44px] px-5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md inline-flex items-center gap-1.5 cursor-pointer" },
+                        react_1.default.createElement(lucide_react_1.Printer, { className: "w-4 h-4" }),
+                        react_1.default.createElement("span", null, "Imprimir A5")))),
+            react_1.default.createElement("div", { className: "space-y-5 pb-4" }, chunkNoteItems(previewNote.items, exports.PEDIDO_A5_ROWS).map((chunk, idx, arr) => (react_1.default.createElement(exports.PedidoA5Sheet, { key: `${previewNote.id}-a5-${idx}`, note: previewNote, itemsChunk: chunk, pageIndex: idx, totalPages: arr.length, emitter: emitter }))))))));
 };
 exports.NotesSection = NotesSection;
 
@@ -9221,7 +10088,7 @@ const App = () => {
     const nextNoteNumber = (0, react_1.useMemo)(() => (0, storageAdapter_1.getNextNoteNumber)(db), [db]);
     const handleSaveNote = async (payload, editingId) => {
         if (!session || session.role === 'cliente')
-            return;
+            return null;
         try {
             const saved = await (0, supabaseDataService_1.dbSaveNote)(empresaId, session.ownerName, payload, editingId);
             setDb((prev) => {
@@ -9236,10 +10103,12 @@ const App = () => {
                 };
             });
             scheduleAutoBackup();
-            showToast(`Nota Nº ${String(saved.numero).padStart(4, '0')} ${editingId ? 'atualizada' : 'emitida'}!`);
+            showToast(`Pedido Nº ${(0, NotesSection_1.formatPedidoNumber)(saved.numero)} ${editingId ? 'atualizado' : 'emitido'}!`);
+            return saved;
         }
         catch (err) {
-            showToast(err?.message || 'Erro ao salvar nota.', 'err');
+            showToast(err?.message || 'Erro ao salvar pedido.', 'err');
+            return null;
         }
     };
     const handleMarkNotePrinted = async (id) => {
@@ -9266,14 +10135,14 @@ const App = () => {
                 notas: (prev.notas || []).filter((n) => n.id !== id),
             }));
             scheduleAutoBackup();
-            showToast('Nota removida!');
+            showToast('Pedido removido!');
         }
         catch (err) {
-            showToast(err?.message || 'Erro ao remover nota.', 'err');
+            showToast(err?.message || 'Erro ao remover pedido.', 'err');
         }
     };
-    const handleTriggerPrint = (note, threePerPage) => {
-        setPrintJob({ note, threePerPage });
+    const handleTriggerPrint = (note, emitter) => {
+        setPrintJob({ note, emitter });
         window.setTimeout(() => {
             window.print();
         }, 120);
@@ -9368,14 +10237,8 @@ const App = () => {
         !OPERATOR_ALLOWED_SECTIONS.includes(activeSection)
         ? 'esteira'
         : activeSection;
-    const printSlips = printJob
-        ? (() => {
-            const chunks = (0, NotesSection_1.chunkNoteItems)(printJob.note.items, 6);
-            if (printJob.threePerPage && chunks.length === 1) {
-                return [chunks[0], chunks[0], chunks[0]];
-            }
-            return chunks;
-        })()
+    const printPages = printJob
+        ? (0, NotesSection_1.chunkNoteItems)(printJob.note.items, NotesSection_1.PEDIDO_A5_ROWS)
         : [];
     return (react_1.default.createElement(react_1.default.Fragment, null,
         react_1.default.createElement("div", { className: "no-print min-h-[100dvh] text-slate-900 pb-24 relative selection:bg-indigo-500 selection:text-white" },
@@ -9426,7 +10289,7 @@ const App = () => {
                         effectiveSection === 'entregas' && (react_1.default.createElement(DeliveriesLogisticsSection_1.DeliveriesLogisticsSection, { orders: db.orders, deliveries: db.deliveries, prefillOrder: prefillDeliveryOrder, onAddDelivery: handleAddDelivery, onDeleteDelivery: handleDeleteDelivery })),
                         effectiveSection === 'retornos' && (react_1.default.createElement(WarrantyReturnsSection_1.WarrantyReturnsSection, { orders: db.orders, returns: db.returns, onAddReturn: handleAddReturn, onUpdateReturnStatus: handleUpdateReturnStatus, onDeleteReturn: handleDeleteReturn })),
                         effectiveSection === 'estoque' && (react_1.default.createElement(StockSection_1.StockSection, { items: db.stock || [], globalSearchQuery: searchQuery, onAddItem: handleAddStockItem, onUpdateItem: handleUpdateStockItem, onDeleteItem: handleDeleteStockItem })),
-                        effectiveSection === 'notas' && session.role !== 'cliente' && (react_1.default.createElement(NotesSection_1.NotesSection, { notas: db.notas || [], companies: db.companies, orders: db.orders, nextNoteNumber: nextNoteNumber, tenantName: session.companyName, currentUserName: session.ownerName, globalSearchQuery: searchQuery, onSaveNote: handleSaveNote, onMarkNotePrinted: handleMarkNotePrinted, onDeleteNote: handleDeleteNote, onTriggerPrint: handleTriggerPrint })),
+                        effectiveSection === 'notas' && session.role !== 'cliente' && (react_1.default.createElement(NotesSection_1.NotesSection, { notas: db.notas || [], companies: db.companies, orders: db.orders, nextNoteNumber: nextNoteNumber, tenantKey: empresaId, currentUserName: session.ownerName, globalSearchQuery: searchQuery, onSaveNote: handleSaveNote, onMarkNotePrinted: handleMarkNotePrinted, onDeleteNote: handleDeleteNote, onTriggerPrint: handleTriggerPrint, onSyncPrintPreview: setPrintJob })),
                         session.role === 'admin' && effectiveSection === 'equipe' && (react_1.default.createElement(TeamManagementSection_1.TeamManagementSection, { session: session, employees: db.employees || [], onAddEmployee: handleAddEmployee, onToggleEmployeeRole: handleToggleEmployeeRole, onDeleteEmployee: handleDeleteEmployee })),
                         session.role === 'admin' &&
                             effectiveSection === 'configuracoes' && (react_1.default.createElement(SettingsBackupsSection_1.SettingsBackupsSection, { empresaId: empresaId, companyName: session.companyName, settings: settingsState.settings, backups: settingsState.backups, logs: settingsState.logs, loading: settingsState.loading, onRefresh: () => refreshSettingsAndBackups(empresaId, session.role), onUpdateSettings: async (updates) => {
@@ -9452,10 +10315,7 @@ const App = () => {
             session.role === 'admin' && (react_1.default.createElement("button", { type: "button", onClick: () => setIsNewModalOpen(true), className: "md:hidden fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-20 min-h-[48px] inline-flex items-center gap-2 px-5 py-3 rounded-full font-bold text-sm bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 text-white border border-white/40 shadow-2xl shadow-indigo-600/40 transition-all cursor-pointer" },
                 react_1.default.createElement("span", null, "Nova OS"))),
             session.role === 'admin' && (react_1.default.createElement(FastEntryModal_1.FastEntryModal, { isOpen: isNewModalOpen, onClose: () => setIsNewModalOpen(false), companies: db.companies, nextOrderId: nextOrderId, onSaveOrder: handleCreateOrderFull }))),
-        printJob && (react_1.default.createElement("div", { className: "print-only-container" }, printSlips.map((chunk, idx) => (react_1.default.createElement(NotesSection_1.CanhotoSlipCard, { key: `print-${printJob.note.id}-${idx}`, note: printJob.note, itemsChunk: chunk, slipIndex: printJob.threePerPage &&
-                (0, NotesSection_1.chunkNoteItems)(printJob.note.items, 6).length === 1
-                ? 0
-                : idx, totalSlips: (0, NotesSection_1.chunkNoteItems)(printJob.note.items, 6).length, tenantName: session.companyName, isPrintMode: true })))))));
+        printJob && (react_1.default.createElement("div", { className: "print-only-container" }, printPages.map((chunk, idx) => (react_1.default.createElement(NotesSection_1.PedidoA5Sheet, { key: `print-${printJob.note.id}-${idx}`, note: printJob.note, itemsChunk: chunk, pageIndex: idx, totalPages: printPages.length, emitter: printJob.emitter, isPrintMode: true })))))));
 };
 exports.App = App;
 exports.default = exports.App;

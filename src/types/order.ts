@@ -47,15 +47,29 @@ export interface NoteItem {
   total: number;
 }
 
+export interface PedidoEmitterProfile {
+  monogram: string;
+  brandName: string;
+  subtitle: string;
+  phone: string;
+  specialtiesLine1: string;
+  specialtiesLine2: string;
+  email: string;
+  website: string;
+  address: string;
+}
+
 export interface NoteRecord {
   id: string;
   company_id?: string;
   numero: number;
-  data: string; // YYYY-MM-DD
+  data: string; // Data entrada (YYYY-MM-DD)
+  dataSaida?: string; // Data saída (YYYY-MM-DD)
   empresaId?: string;
   clienteNome: string;
-  cnpj: string;
-  contato: string;
+  cnpj: string; // CNPJ ou CPF
+  inscricao?: string; // Inscrição Estadual / Municipal
+  contato: string; // Fone / Contato
   endereco?: string;
   entreguePor?: string;
   osId?: string;
