@@ -26,6 +26,7 @@ interface HeaderBarProps {
   onOpenNewOrder: () => void;
   tenantName: string;
   userRole: UserRole;
+  isSuperAdmin?: boolean;
   userName: string;
   realtimeStatus: 'connected' | 'supabase_live' | 'reconnecting';
   onLogout: () => void;
@@ -48,6 +49,7 @@ export const NAV_SECTIONS: {
   shortLabel: string;
   group: 'primary' | 'operacao' | 'gestao';
   roles: UserRole[];
+  superAdminOnly?: boolean;
   icon: React.FC<{ className?: string }>;
 }[] = [
   {
@@ -128,6 +130,7 @@ export const NAV_SECTIONS: {
     shortLabel: 'Configurações',
     group: 'gestao',
     roles: ['admin'],
+    superAdminOnly: true,
     icon: Settings,
   },
 ];
@@ -155,6 +158,7 @@ const SidebarBody: React.FC<{
   onSelectSection: (section: ActiveSection) => void;
   tenantName: string;
   userRole: UserRole;
+  isSuperAdmin?: boolean;
   userName: string;
   onLogout: () => void;
   counts: HeaderBarProps['counts'];
@@ -164,13 +168,15 @@ const SidebarBody: React.FC<{
   onSelectSection,
   tenantName,
   userRole,
+  isSuperAdmin = false,
   userName,
   onLogout,
   counts,
   onCloseMobile,
 }) => {
-  const visibleSections = NAV_SECTIONS.filter((item) =>
-    item.roles.includes(userRole)
+  const visibleSections = NAV_SECTIONS.filter(
+    (item) =>
+      item.roles.includes(userRole) && (!item.superAdminOnly || isSuperAdmin)
   );
   const primaryItem = visibleSections.find((s) => s.group === 'primary');
   const operacaoItems = visibleSections.filter((s) => s.group === 'operacao');
@@ -340,6 +346,7 @@ export const LiquidSidebar: React.FC<
     | 'onSelectSection'
     | 'tenantName'
     | 'userRole'
+    | 'isSuperAdmin'
     | 'userName'
     | 'onLogout'
     | 'counts'
@@ -363,6 +370,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenNewOrder,
   tenantName,
   userRole,
+  isSuperAdmin = false,
   userName,
   onLogout,
   counts,
@@ -479,6 +487,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               onSelectSection={onSelectSection}
               tenantName={tenantName}
               userRole={userRole}
+              isSuperAdmin={isSuperAdmin}
               userName={userName}
               onLogout={onLogout}
               counts={counts}

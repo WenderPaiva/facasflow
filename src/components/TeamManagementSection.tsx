@@ -217,7 +217,7 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                       <div className="text-[11px] font-medium text-slate-700 mt-0.5 leading-relaxed">
                         Libera acesso apenas para{' '}
                         <span className="text-indigo-700 font-bold">
-                          Esteira, Entregas, Retornos e Estoque
+                          Esteira, Entregas, Retornos, Estoque e Notas
                         </span>
                         . Oculta Finanças, Empresas e Visão Geral.
                       </div>
@@ -364,15 +364,17 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                         )}
                       </button>
 
-                      {!isSelf && (
+                      {!isSelf && emp.id && (
                         <button
                           type="button"
                           disabled={busyId === emp.id}
                           onClick={async () => {
-                            setBusyId(emp.id);
+                            const memberId = emp.id;
+                            if (!memberId) return;
+                            setBusyId(memberId);
                             try {
                               await onToggleEmployeeRole(
-                                emp.id,
+                                memberId,
                                 isOperador ? 'admin' : 'operador'
                               );
                             } finally {
@@ -390,15 +392,18 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                       )}
 
                       {!isSelf &&
+                        emp.id &&
                         (confirmDeleteId === emp.id ? (
                           <div className="inline-flex items-center gap-1.5 bg-rose-500/15 border border-rose-300/70 rounded-full px-3 py-1">
                             <button
                               type="button"
                               disabled={busyId === emp.id}
                               onClick={async () => {
-                                setBusyId(emp.id);
+                                const memberId = emp.id;
+                                if (!memberId) return;
+                                setBusyId(memberId);
                                 try {
-                                  await onDeleteEmployee(emp.id);
+                                  await onDeleteEmployee(memberId);
                                   setConfirmDeleteId(null);
                                 } finally {
                                   setBusyId(null);
@@ -420,10 +425,10 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteId(emp.id)}
-                            aria-label="Apagar funcionário"
-                            className="min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center transition cursor-pointer"
-                            title="Apagar funcionário"
+                            onClick={() => setConfirmDeleteId(emp.id || null)}
+                            aria-label="Excluir funcionário"
+                            className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                            title="Excluir funcionário"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -438,11 +443,10 @@ export const TeamManagementSection: React.FC<TeamManagementSectionProps> = ({
           <div className="mt-6 pt-4 border-t border-white/60 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-slate-600">
             <span className="flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-indigo-600" />
-              Operadores enxergam apenas as Seções 2, 4 e 5.
+              Operadores acessam apenas Esteira, Entregas, Retornos, Estoque e Notas.
             </span>
             <span>
-              Dica: Abra uma aba anônima e faça login como operador para ver o
-              Realtime funcionando ao vivo!
+              As permissões são aplicadas em tempo real no painel e no banco de dados.
             </span>
           </div>
         </div>

@@ -27,6 +27,7 @@ const MODULE_FILES = [
   'components/ExpensesSubsection.tsx',
   'components/CollaboratorsSubsection.tsx',
   'components/InvestmentsSubsection.tsx',
+  'components/MonthlyReportSubsection.tsx',
   'components/FinanceAnalyticsSection.tsx',
   'components/DeliveriesLogisticsSection.tsx',
   'components/WarrantyReturnsSection.tsx',

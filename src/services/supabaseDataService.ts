@@ -17,13 +17,17 @@ import {
   ProductionStage,
   ReturnStatus,
   ServiceProviderRecord,
+  StockCategory,
   StockItem,
+  StockMovementRecord,
+  StockMovementType,
   TenantAccount,
   UserRole,
   WarrantyReturnRecord,
 } from '../types/order';
 import {
   addDays,
+  normalizeInvestmentType,
   PAYMENT_MODALITY_META,
   roundCurrencyBRL,
   toISODate,
@@ -58,7 +62,7 @@ async function resolveProfileSession(userId: string, email: string): Promise<Aut
   const sb = getSupabaseClient();
   const { data: perfil, error: pErr } = await sb
     .from('perfis')
-    .select('id, empresa_id, nome, email, role, cargo, ativo, deleted_at')
+    .select('id, empresa_id, nome, email, role, cargo, ativo, deleted_at, is_super_admin')
     .eq('id', userId)
     .is('deleted_at', null)
     .eq('ativo', true)
@@ -77,6 +81,11 @@ async function resolveProfileSession(userId: string, email: string): Promise<Aut
     .is('deleted_at', null)
     .maybeSingle();
 
+  const resolvedEmail = String(perfil.email || email).trim().toLowerCase();
+  const isSuperAdmin =
+    Boolean(perfil.is_super_admin) &&
+    resolvedEmail === 'wenderautomation@gmail.com';
+
   return {
     userId: perfil.id,
     company_id: perfil.empresa_id,
@@ -90,6 +99,7 @@ async function resolveProfileSession(userId: string, email: string): Promise<Aut
         : perfil.role === 'cliente'
         ? 'cliente'
         : 'admin',
+    isSuperAdmin,
     jobTitle: perfil.cargo || undefined,
     loggedInAt: new Date().toISOString(),
   };
@@ -224,6 +234,7 @@ export async function loadCompanyDatabaseFromSupabase(
     deliveriesRes,
     returnsRes,
     stockRes,
+    stockMovRes,
     notasRes,
     notaItensRes,
     despesasRes,
@@ -263,6 +274,15 @@ export async function loadCompanyDatabaseFromSupabase(
           .eq('empresa_id', empresaId)
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    role !== 'cliente'
+      ? sb
+          .from('estoque_movimentacoes')
+          .select('*')
+          .eq('empresa_id', empresaId)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+          .limit(100)
       : Promise.resolve({ data: [], error: null }),
     role !== 'cliente'
       ? sb
@@ -422,6 +442,24 @@ export async function loadCompanyDatabaseFromSupabase(
     updatedAt: String(s.updated_at || ''),
   }));
 
+  const stockMovements: StockMovementRecord[] = (stockMovRes.data || []).map((m: any) => ({
+    id: m.id,
+    empresa_id: m.empresa_id,
+    stockItemUuid: m.estoque_item_id,
+    itemCode: m.item_codigo || '',
+    itemName: m.item_nome,
+    category: m.categoria === 'laminas' ? 'laminas' : 'madeiras',
+    unit: m.unidade || 'un',
+    type: m.tipo as StockMovementType,
+    quantity: Number(m.quantidade) || 0,
+    previousBalance: Number(m.saldo_anterior) || 0,
+    newBalance: Number(m.saldo_posterior) || 0,
+    actorName: m.responsavel_nome || 'Equipe',
+    note: m.observacao || undefined,
+    revertedAt: m.estornado_em || null,
+    createdAt: m.created_at || '',
+  }));
+
   const itemsByNota = new Map<string, NoteItem[]>();
   for (const row of notaItensRes.data || []) {
     const arr = itemsByNota.get(row.nota_id) || [];
@@ -509,7 +547,8 @@ export async function loadCompanyDatabaseFromSupabase(
     dbUuid: i.id,
     company_id: i.empresa_id,
     assetName: i.nome_ativo,
-    assetType: i.tipo_ativo,
+    description: i.descricao || undefined,
+    assetType: normalizeInvestmentType(i.categoria || i.tipo_ativo),
     appliedDate: String(i.data_aplicacao || '').slice(0, 10),
     investedAmount: Number(i.valor_aplicado) || 0,
     currentAmount: Number(i.valor_atual) || 0,
@@ -541,6 +580,7 @@ export async function loadCompanyDatabaseFromSupabase(
     deliveries,
     returns,
     stock,
+    stockMovements,
     notas,
     noteSequence,
     despesas,
@@ -618,13 +658,11 @@ export async function dbCreateOrder(
   const sb = getSupabaseClient();
   const today = toISODate();
   const days = PAYMENT_MODALITY_META[payload.paymentModality]?.defaultDays ?? 30;
-  let payStatus: 'pago' | 'a_receber' | 'nao_pago' = 'a_receber';
-  if (payload.paymentModality === 'nao_pago') payStatus = 'nao_pago';
-  else if (payload.paymentModality === 'pix' || payload.paymentModality === 'dinheiro') {
-    payStatus = 'pago';
-  }
+  // Regra 5.1: Toda OS nasce obrigatoriamente como "Não Pago", independentemente
+  // da forma de pagamento selecionada. Só muda para "Pago" ao clicar em "Marcar como pago".
+  const payStatus = 'nao_pago' as const;
   const dueDate = addDays(today, days);
-  const paidAt = payStatus === 'pago' ? today : null;
+  const paidAt = null;
   const hist = [{ stage: payload.stage, timestamp: payload.stageUpdatedAt }];
 
   const { data, error } = await sb
@@ -930,6 +968,180 @@ export async function dbSoftDeleteStockItem(empresaId: string, dbUuid: string): 
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
   if (error) throw new Error(error.message);
+}
+
+export async function dbRegisterStockMovement(
+  empresaId: string,
+  item: StockItem,
+  delta: number,
+  actorName: string,
+  note?: string
+): Promise<{ updatedItem: StockItem; movement: StockMovementRecord }> {
+  if (!item.dbUuid) {
+    throw new Error('Item de estoque sem identificador no Supabase.');
+  }
+  const sb = getSupabaseClient();
+  const previousBalance = Number(item.quantity) || 0;
+  const nextBalance = Math.max(0, Number((previousBalance + delta).toFixed(2)));
+  const movedQty = Math.abs(Number((nextBalance - previousBalance).toFixed(2)));
+
+  if (movedQty <= 0) {
+    throw new Error('Saldo já está zerado para este insumo.');
+  }
+
+  const movementType: StockMovementType = delta < 0 ? 'consumo' : 'reposicao';
+
+  const { data: stockRow, error: upErr } = await sb
+    .from('estoque_itens')
+    .update({ quantidade: nextBalance })
+    .eq('id', item.dbUuid)
+    .eq('empresa_id', empresaId)
+    .select('*')
+    .single();
+  if (upErr) throw new Error(upErr.message);
+
+  const { data: movRow, error: movErr } = await sb
+    .from('estoque_movimentacoes')
+    .insert({
+      id: generateUuid(),
+      empresa_id: empresaId,
+      estoque_item_id: item.dbUuid,
+      item_codigo: item.id,
+      item_nome: item.name,
+      categoria: item.category,
+      unidade: item.unit,
+      tipo: movementType,
+      quantidade: movedQty,
+      saldo_anterior: previousBalance,
+      saldo_posterior: nextBalance,
+      responsavel_nome: actorName,
+      observacao: note || null,
+    })
+    .select('*')
+    .single();
+  if (movErr) throw new Error(movErr.message);
+
+  return {
+    updatedItem: {
+      id: stockRow.codigo_legado || stockRow.id,
+      dbUuid: stockRow.id,
+      company_id: stockRow.empresa_id,
+      category: stockRow.categoria === 'laminas' ? 'laminas' : 'madeiras',
+      name: stockRow.nome,
+      quantity: Number(stockRow.quantidade) || 0,
+      unit: stockRow.unidade,
+      minStock: Number(stockRow.estoque_minimo) || 0,
+      supplier: stockRow.fornecedor,
+      unitCost: Number(stockRow.custo_unitario) || 0,
+      entryDate: String(stockRow.data_entrada || '').slice(0, 10),
+      updatedAt: stockRow.updated_at,
+    },
+    movement: {
+      id: movRow.id,
+      empresa_id: movRow.empresa_id,
+      stockItemUuid: movRow.estoque_item_id,
+      itemCode: movRow.item_codigo || item.id,
+      itemName: movRow.item_nome,
+      category: (movRow.categoria === 'laminas' ? 'laminas' : 'madeiras') as StockCategory,
+      unit: movRow.unidade,
+      type: movRow.tipo as StockMovementType,
+      quantity: Number(movRow.quantidade) || movedQty,
+      previousBalance: Number(movRow.saldo_anterior) || previousBalance,
+      newBalance: Number(movRow.saldo_posterior) || nextBalance,
+      actorName: movRow.responsavel_nome || actorName,
+      note: movRow.observacao || undefined,
+      revertedAt: movRow.estornado_em || null,
+      createdAt: movRow.created_at,
+    },
+  };
+}
+
+export async function dbRevertStockMovement(
+  empresaId: string,
+  movement: StockMovementRecord,
+  currentItem: StockItem,
+  actorName: string
+): Promise<{ updatedItem: StockItem; revertedAt: string; estornoMovement: StockMovementRecord }> {
+  if (!currentItem.dbUuid) {
+    throw new Error('Item de estoque não localizado para estorno.');
+  }
+  const sb = getSupabaseClient();
+  const prevBalance = Number(currentItem.quantity) || 0;
+  const reverseDelta = movement.type === 'consumo' ? movement.quantity : -movement.quantity;
+  const nextBalance = Math.max(0, Number((prevBalance + reverseDelta).toFixed(2)));
+  const nowIso = new Date().toISOString();
+
+  const { data: stockRow, error: upErr } = await sb
+    .from('estoque_itens')
+    .update({ quantidade: nextBalance })
+    .eq('id', currentItem.dbUuid)
+    .eq('empresa_id', empresaId)
+    .select('*')
+    .single();
+  if (upErr) throw new Error(upErr.message);
+
+  const { error: markErr } = await sb
+    .from('estoque_movimentacoes')
+    .update({ estornado_em: nowIso })
+    .eq('id', movement.id)
+    .eq('empresa_id', empresaId);
+  if (markErr) throw new Error(markErr.message);
+
+  const { data: estRow, error: estErr } = await sb
+    .from('estoque_movimentacoes')
+    .insert({
+      id: generateUuid(),
+      empresa_id: empresaId,
+      estoque_item_id: currentItem.dbUuid,
+      item_codigo: currentItem.id,
+      item_nome: currentItem.name,
+      categoria: currentItem.category,
+      unidade: currentItem.unit,
+      tipo: 'estorno',
+      quantidade: movement.quantity,
+      saldo_anterior: prevBalance,
+      saldo_posterior: nextBalance,
+      responsavel_nome: actorName,
+      observacao: `Estorno de ${movement.type === 'consumo' ? 'baixa' : 'reposição'}`,
+    })
+    .select('*')
+    .single();
+  if (estErr) throw new Error(estErr.message);
+
+  return {
+    updatedItem: {
+      id: stockRow.codigo_legado || stockRow.id,
+      dbUuid: stockRow.id,
+      company_id: stockRow.empresa_id,
+      category: stockRow.categoria === 'laminas' ? 'laminas' : 'madeiras',
+      name: stockRow.nome,
+      quantity: Number(stockRow.quantidade) || 0,
+      unit: stockRow.unidade,
+      minStock: Number(stockRow.estoque_minimo) || 0,
+      supplier: stockRow.fornecedor,
+      unitCost: Number(stockRow.custo_unitario) || 0,
+      entryDate: String(stockRow.data_entrada || '').slice(0, 10),
+      updatedAt: stockRow.updated_at,
+    },
+    revertedAt: nowIso,
+    estornoMovement: {
+      id: estRow.id,
+      empresa_id: estRow.empresa_id,
+      stockItemUuid: estRow.estoque_item_id,
+      itemCode: estRow.item_codigo || currentItem.id,
+      itemName: estRow.item_nome,
+      category: (estRow.categoria === 'laminas' ? 'laminas' : 'madeiras') as StockCategory,
+      unit: estRow.unidade,
+      type: 'estorno',
+      quantity: Number(estRow.quantidade) || movement.quantity,
+      previousBalance: Number(estRow.saldo_anterior) || prevBalance,
+      newBalance: Number(estRow.saldo_posterior) || nextBalance,
+      actorName: estRow.responsavel_nome || actorName,
+      note: estRow.observacao || undefined,
+      revertedAt: null,
+      createdAt: estRow.created_at,
+    },
+  };
 }
 
 // NOTAS (server-side total + soft delete)
@@ -1335,6 +1547,11 @@ export async function dbCreateInvestment(
   payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<InvestmentRecord> {
   const sb = getSupabaseClient();
+  const normalizedCat = normalizeInvestmentType(payload.assetType);
+  const appliedVal = roundCurrencyBRL(payload.investedAmount);
+  const currentVal = roundCurrencyBRL(
+    payload.currentAmount > 0 ? payload.currentAmount : payload.investedAmount
+  );
   const { data, error } = await sb
     .from('investimentos')
     .insert({
@@ -1342,10 +1559,12 @@ export async function dbCreateInvestment(
       empresa_id: empresaId,
       codigo_legado: codigoLegado,
       nome_ativo: payload.assetName,
-      tipo_ativo: payload.assetType,
+      descricao: payload.description?.trim() || null,
+      tipo_ativo: 'outro',
+      categoria: normalizedCat,
       data_aplicacao: payload.appliedDate || toISODate(),
-      valor_aplicado: roundCurrencyBRL(payload.investedAmount),
-      valor_atual: roundCurrencyBRL(payload.currentAmount),
+      valor_aplicado: appliedVal,
+      valor_atual: currentVal,
     })
     .select('*')
     .single();
@@ -1355,7 +1574,8 @@ export async function dbCreateInvestment(
     dbUuid: data.id,
     company_id: data.empresa_id,
     assetName: data.nome_ativo,
-    assetType: data.tipo_ativo,
+    description: data.descricao || undefined,
+    assetType: normalizeInvestmentType(data.categoria || data.tipo_ativo),
     appliedDate: String(data.data_aplicacao).slice(0, 10),
     investedAmount: Number(data.valor_aplicado),
     currentAmount: Number(data.valor_atual),
@@ -1369,14 +1589,21 @@ export async function dbUpdateInvestment(
   payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<InvestmentRecord> {
   const sb = getSupabaseClient();
+  const normalizedCat = normalizeInvestmentType(payload.assetType);
+  const appliedVal = roundCurrencyBRL(payload.investedAmount);
+  const currentVal = roundCurrencyBRL(
+    payload.currentAmount > 0 ? payload.currentAmount : payload.investedAmount
+  );
   const { data, error } = await sb
     .from('investimentos')
     .update({
       nome_ativo: payload.assetName,
-      tipo_ativo: payload.assetType,
+      descricao: payload.description?.trim() || null,
+      tipo_ativo: 'outro',
+      categoria: normalizedCat,
       data_aplicacao: payload.appliedDate || toISODate(),
-      valor_aplicado: roundCurrencyBRL(payload.investedAmount),
-      valor_atual: roundCurrencyBRL(payload.currentAmount),
+      valor_aplicado: appliedVal,
+      valor_atual: currentVal,
     })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId)
@@ -1388,7 +1615,8 @@ export async function dbUpdateInvestment(
     dbUuid: data.id,
     company_id: data.empresa_id,
     assetName: data.nome_ativo,
-    assetType: data.tipo_ativo,
+    description: data.descricao || undefined,
+    assetType: normalizeInvestmentType(data.categoria || data.tipo_ativo),
     appliedDate: String(data.data_aplicacao).slice(0, 10),
     investedAmount: Number(data.valor_aplicado),
     currentAmount: Number(data.valor_atual),

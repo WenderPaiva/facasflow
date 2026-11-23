@@ -253,10 +253,11 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
                         <button
                           type="button"
                           onClick={() => onDeleteReturn(ret.id)}
-                          className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
-                          title="Apagar registro de retorno"
+                          className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                          title="Excluir registro de retorno"
+                          aria-label="Excluir registro de retorno"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

@@ -10,7 +10,6 @@ import {
   Printer,
   RotateCcw,
   Settings2,
-  Sparkles,
   Trash2,
 } from 'lucide-react';
 import {
@@ -22,51 +21,49 @@ import {
   PedidoEmitterProfile,
 } from '../types/order';
 import {
-  addDays,
   formatBRL,
   formatCpfCnpjMask,
   formatDateBR,
   formatPhoneMask,
   formatQuantityBR,
-  isValidCpfOrCnpj,
   roundCurrencyBRL,
   toISODate,
 } from '../utils/financeEngine';
 
 export const PEDIDO_A5_ROWS = 15;
 
-export const DEFAULT_FICTITIOUS_EMITTER: PedidoEmitterProfile = {
-  monogram: 'FM',
-  brandName: 'facaria modelo',
-  subtitle: 'facas de corte e vinco',
-  phone: '(00) 3000-0000 / 9.0000-0000',
+export const DEFAULT_EMITTER_PROFILE: PedidoEmitterProfile = {
+  monogram: 'QF',
+  brandName: 'QUALIFACAS',
+  subtitle: 'FACAS DE CORTE E VINCO',
+  phone: '(62) 9 8143-2096',
   specialtiesLine1: 'FACAS P/ MEIO CORTE, ENVELOPES, TAGS',
   specialtiesLine2: 'E CARTONAGEM EM GERAL',
-  email: 'contato@facariamodelo.example',
-  website: 'www.facariamodelo.example',
-  address: 'Av. Exemplo Industrial, Nº 100 - Setor Modelo - Cidade - UF',
+  email: 'qualifacas@hotmail.com',
+  website: '',
+  address: 'Av. Independência N° 1507 - St. L. Vila Nova - Goiânia - GO',
 };
 
-const EMITTER_STORAGE_PREFIX = 'facasflow_pedido_a5_emitter_v1_';
+const EMITTER_STORAGE_PREFIX = 'facasflow_pedido_a5_emitter_v2_';
 
 export function loadPedidoEmitterProfile(
   tenantKey?: string
 ): PedidoEmitterProfile {
   try {
     if (typeof window === 'undefined' || !window.localStorage) {
-      return DEFAULT_FICTITIOUS_EMITTER;
+      return DEFAULT_EMITTER_PROFILE;
     }
     const raw = window.localStorage.getItem(
       `${EMITTER_STORAGE_PREFIX}${tenantKey || 'default'}`
     );
-    if (!raw) return DEFAULT_FICTITIOUS_EMITTER;
+    if (!raw) return DEFAULT_EMITTER_PROFILE;
     const parsed = JSON.parse(raw);
     return {
-      ...DEFAULT_FICTITIOUS_EMITTER,
+      ...DEFAULT_EMITTER_PROFILE,
       ...(parsed && typeof parsed === 'object' ? parsed : {}),
     };
   } catch {
-    return DEFAULT_FICTITIOUS_EMITTER;
+    return DEFAULT_EMITTER_PROFILE;
   }
 }
 
@@ -83,53 +80,6 @@ export function savePedidoEmitterProfile(
   } catch {
     // non-blocking
   }
-}
-
-export function createFictitiousDemoNote(nextNumber: number): NoteRecord {
-  const today = toISODate();
-  const items: NoteItem[] = [
-    {
-      id: 'DEMO-IT-1',
-      descricao: 'Faca Caixa Cartão 300g com Tampa Automática (18mm)',
-      quantidade: 1,
-      precoUnitario: 380,
-      total: 380,
-    },
-    {
-      id: 'DEMO-IT-2',
-      descricao: 'Faca Tag Retangular 50×90 mm c/ Furo Central (Meio Corte)',
-      quantidade: 2,
-      precoUnitario: 165,
-      total: 330,
-    },
-    {
-      id: 'DEMO-IT-3',
-      descricao: 'Emborrachamento Técnico e Ajuste Fino de Vinco',
-      quantidade: 1,
-      precoUnitario: 95.5,
-      total: 95.5,
-    },
-  ];
-  const total = roundCurrencyBRL(
-    items.reduce((sum, item) => sum + item.total, 0)
-  );
-
-  return {
-    id: '__demo_a5__',
-    numero: Math.max(1, nextNumber),
-    data: today,
-    dataSaida: addDays(today, 2),
-    clienteNome: 'Gráfica Horizonte Ltda (Exemplo)',
-    cnpj: '11.222.333/0001-81',
-    inscricao: 'ISENTO',
-    contato: '(00) 99123-4567',
-    endereco: 'Rua das Artes Gráficas, 250 - Centro - Cidade Exemplo - UF',
-    status: 'rascunho',
-    items,
-    total,
-    criadoPor: 'Protótipo',
-    criadoEm: new Date().toISOString(),
-  };
 }
 
 export function formatPedidoNumber(numero: number): string {
@@ -172,47 +122,62 @@ const NOTE_STATUS_META: Record<
 };
 
 const PedidoBrandMark: React.FC<{ monogram: string }> = ({ monogram }) => {
-  const letters = (monogram || 'FM').trim().slice(0, 3).toUpperCase();
+  const letters = (monogram || 'QF').trim().slice(0, 3).toUpperCase();
+  if (letters === 'QF') {
+    return (
+      <svg
+        viewBox="0 0 116 74"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        style={{
+          width: 'calc(26 * var(--u))',
+          height: 'calc(16.6 * var(--u))',
+          display: 'block',
+        }}
+        aria-hidden="true"
+      >
+        {/* Logotipo oficial QF em contorno duplo vermelho (#C8102E) */}
+        <path
+          d="M36 6C19.5 6 6 19.2 6 35.8C6 52.4 19.5 65.6 36 65.6C43.2 65.6 49.8 63.1 55 58.9L63.5 67.2L69.5 61.4L61.2 53.3C64.4 48.2 66.2 42.2 66.2 35.8C66.2 19.2 52.6 6 36 6ZM36 14.2C48.1 14.2 57.6 23.7 57.6 35.8C57.6 40.2 56.3 44.3 54 47.7L46.5 40.4L40.6 46.2L48.1 53.4C44.6 56 40.5 57.4 36 57.4C23.9 57.4 14.4 47.9 14.4 35.8C14.4 23.7 23.9 14.2 36 14.2Z"
+          fill="#ffffff"
+          stroke="#C8102E"
+          strokeWidth="2.4"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M71 8H109V16.5H80.2V31.5H104.5V39.8H80.2V64.5H71V8Z"
+          fill="#ffffff"
+          stroke="#C8102E"
+          strokeWidth="2.4"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
   return (
     <svg
-      viewBox="0 0 88 54"
+      viewBox="0 0 110 66"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       style={{
-        width: 'calc(21.5 * var(--u))',
-        height: 'calc(13.2 * var(--u))',
+        width: 'calc(24 * var(--u))',
+        height: 'calc(15 * var(--u))',
         display: 'block',
       }}
       aria-hidden="true"
     >
-      {/* Geometric die-cut frame emblem (original prototype icon) */}
-      <rect
-        x="4"
-        y="4"
-        width="80"
-        height="46"
-        rx="12"
-        stroke="#b84a39"
-        strokeWidth="3.2"
-      />
-      <path
-        d="M18 11H70M18 43H70"
-        stroke="#b84a39"
-        strokeWidth="1.2"
-        strokeDasharray="4 3"
-        opacity="0.7"
-      />
-      <circle cx="15" cy="27" r="3" fill="#b84a39" opacity="0.85" />
-      <circle cx="73" cy="27" r="3" fill="#b84a39" opacity="0.85" />
       <text
-        x="44"
-        y="34.5"
+        x="55"
+        y="50"
         textAnchor="middle"
-        fill="#b84a39"
+        fill="#ffffff"
+        stroke="#C8102E"
+        strokeWidth="2.6"
         fontFamily="Inter, Plus Jakarta Sans, Arial, sans-serif"
-        fontWeight="800"
-        fontSize="24"
-        letterSpacing="1.5"
+        fontWeight="900"
+        fontSize="48"
+        letterSpacing="2"
       >
         {letters}
       </text>
@@ -234,7 +199,7 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
   itemsChunk,
   pageIndex,
   totalPages,
-  emitter = DEFAULT_FICTITIOUS_EMITTER,
+  emitter = DEFAULT_EMITTER_PROFILE,
   isPrintMode = false,
 }) => {
   const formattedNum = formatPedidoNumber(note.numero);
@@ -253,8 +218,8 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
     return itemsChunk[i] || null;
   });
 
-  const thinBorder = 'calc(0.32 * var(--u)) solid #27272a';
-  const innerRule = 'calc(0.22 * var(--u)) solid #52525b';
+  const thinBorder = 'calc(0.32 * var(--u)) solid #000000';
+  const innerRule = 'calc(0.24 * var(--u)) solid #000000';
   const radius = 'calc(2.4 * var(--u))';
 
   const sheetBody = (
@@ -268,8 +233,8 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
         style={{
           display: 'flex',
           alignItems: 'stretch',
-          gap: 'calc(1.2 * var(--u))',
-          height: 'calc(30.5 * var(--u))',
+          gap: 'calc(1.4 * var(--u))',
+          height: 'calc(31.5 * var(--u))',
           flexShrink: 0,
         }}
       >
@@ -283,31 +248,32 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
             padding: 'calc(1.8 * var(--u)) calc(2.4 * var(--u))',
             display: 'flex',
             alignItems: 'center',
-            gap: 'calc(2 * var(--u))',
+            gap: 'calc(2.2 * var(--u))',
             backgroundColor: '#ffffff',
           }}
         >
           {/* Logo + Brand Name */}
           <div
             style={{
-              width: 'calc(28 * var(--u))',
+              width: 'calc(30 * var(--u))',
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 'calc(0.6 * var(--u))',
+              gap: 'calc(0.5 * var(--u))',
             }}
           >
             <PedidoBrandMark monogram={emitter.monogram} />
             <div
               style={{
-                fontSize: 'calc(3.05 * var(--u))',
-                fontWeight: 800,
-                color: '#b84a39',
+                fontSize: 'calc(3.1 * var(--u))',
+                fontWeight: 900,
+                color: '#C8102E',
                 lineHeight: 1.05,
-                letterSpacing: '-0.02em',
+                letterSpacing: '0.02em',
                 textAlign: 'center',
+                textTransform: 'uppercase',
                 maxWidth: '100%',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -318,11 +284,13 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
             </div>
             <div
               style={{
-                fontSize: 'calc(1.85 * var(--u))',
-                fontWeight: 600,
-                color: '#a14435',
+                fontSize: 'calc(1.75 * var(--u))',
+                fontWeight: 800,
+                color: '#C8102E',
                 lineHeight: 1.05,
+                letterSpacing: '0.02em',
                 textAlign: 'center',
+                textTransform: 'uppercase',
                 maxWidth: '100%',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -342,18 +310,18 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: 'space-between',
+              justifyContent: 'space-evenly',
               textAlign: 'center',
-              paddingTop: 'calc(0.3 * var(--u))',
-              paddingBottom: 'calc(0.3 * var(--u))',
+              paddingTop: 'calc(0.2 * var(--u))',
+              paddingBottom: 'calc(0.2 * var(--u))',
             }}
           >
             <div
               style={{
-                fontSize: 'calc(3.35 * var(--u))',
+                fontSize: 'calc(3.85 * var(--u))',
                 fontWeight: 800,
-                color: '#b84a39',
-                lineHeight: 1.12,
+                color: '#C8102E',
+                lineHeight: 1.1,
                 letterSpacing: '0.01em',
                 maxWidth: '100%',
                 overflow: 'hidden',
@@ -367,8 +335,8 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
             <div
               style={{
                 fontSize: 'calc(2.15 * var(--u))',
-                fontWeight: 700,
-                color: '#27272a',
+                fontWeight: 800,
+                color: '#000000',
                 lineHeight: 1.25,
                 textTransform: 'uppercase',
               }}
@@ -379,10 +347,10 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
 
             <div
               style={{
-                fontSize: 'calc(2.25 * var(--u))',
-                fontWeight: 600,
-                color: '#b84a39',
-                lineHeight: 1.22,
+                fontSize: 'calc(2.45 * var(--u))',
+                fontWeight: 700,
+                color: '#C8102E',
+                lineHeight: 1.18,
                 maxWidth: '100%',
               }}
             >
@@ -395,27 +363,27 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
               >
                 {emitter.email}
               </div>
-              <div
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {emitter.website}
-              </div>
+              {emitter.website && (
+                <div
+                  style={{
+                    fontSize: 'calc(2.05 * var(--u))',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {emitter.website}
+                </div>
+              )}
             </div>
 
             <div
               style={{
-                fontSize: 'calc(1.95 * var(--u))',
+                fontSize: 'calc(2.0 * var(--u))',
                 fontWeight: 600,
-                color: '#27272a',
-                lineHeight: 1.15,
+                color: '#111111',
+                lineHeight: 1.2,
                 maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
               }}
             >
               {emitter.address}
@@ -426,11 +394,11 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
         {/* Right PEDIDO Number Box */}
         <div
           style={{
-            width: 'calc(35.5 * var(--u))',
+            width: 'calc(36 * var(--u))',
             flexShrink: 0,
             border: thinBorder,
             borderRadius: radius,
-            padding: 'calc(2.4 * var(--u)) calc(2 * var(--u))',
+            padding: 'calc(2.6 * var(--u)) calc(2 * var(--u))',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -440,10 +408,10 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
         >
           <div
             style={{
-              fontSize: 'calc(5.1 * var(--u))',
-              fontWeight: 800,
-              color: '#27272a',
-              letterSpacing: '0.06em',
+              fontSize: 'calc(5.2 * var(--u))',
+              fontWeight: 900,
+              color: '#000000',
+              letterSpacing: '0.05em',
               lineHeight: 1.05,
               textTransform: 'uppercase',
             }}
@@ -453,11 +421,11 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
 
           <div
             style={{
-              fontSize: 'calc(4.85 * var(--u))',
-              fontWeight: 700,
-              color: '#c2412d',
+              fontSize: 'calc(5.0 * var(--u))',
+              fontWeight: 800,
+              color: '#C8102E',
               fontVariantNumeric: 'tabular-nums',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.06em',
               lineHeight: 1.05,
               marginBottom:
                 totalPages > 1 ? 'calc(0.4 * var(--u))' : 'calc(2.8 * var(--u))',
@@ -471,7 +439,7 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
               style={{
                 fontSize: 'calc(1.85 * var(--u))',
                 fontWeight: 700,
-                color: '#52525b',
+                color: '#000000',
                 lineHeight: 1,
               }}
             >
@@ -933,15 +901,15 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
           <div
             style={{
               width: '82%',
-              borderBottom: 'calc(0.28 * var(--u)) solid #27272a',
+              borderBottom: 'calc(0.32 * var(--u)) solid #000000',
               marginBottom: 'calc(1 * var(--u))',
             }}
           />
           <span
             style={{
               fontSize: 'calc(2.15 * var(--u))',
-              fontWeight: 700,
-              color: '#27272a',
+              fontWeight: 800,
+              color: '#000000',
               letterSpacing: '0.04em',
               textTransform: 'uppercase',
             }}
@@ -967,9 +935,9 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
         >
           <span
             style={{
-              fontSize: 'calc(1.65 * var(--u))',
-              fontWeight: 700,
-              color: '#52525b',
+              fontSize: 'calc(1.7 * var(--u))',
+              fontWeight: 800,
+              color: '#000000',
               letterSpacing: '0.05em',
               lineHeight: 1,
               textTransform: 'uppercase',
@@ -979,9 +947,9 @@ export const PedidoA5Sheet: React.FC<PedidoA5SheetProps> = ({
           </span>
           <span
             style={{
-              fontSize: 'calc(3.05 * var(--u))',
-              fontWeight: 800,
-              color: '#09090b',
+              fontSize: 'calc(3.1 * var(--u))',
+              fontWeight: 900,
+              color: '#000000',
               textAlign: 'right',
               fontVariantNumeric: 'tabular-nums',
               lineHeight: 1.05,
@@ -1038,10 +1006,9 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
   const [viewMode, setViewMode] = useState<'list' | 'form' | 'preview'>('list');
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   const [previewNoteId, setPreviewNoteId] = useState<string | null>(null);
-  const [demoPreviewNote, setDemoPreviewNote] = useState<NoteRecord | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Emitter header profile (defaults to strictly fictitious prototype data)
+  // Emitter header profile (defaults to QUALIFACAS official profile)
   const [emitter, setEmitter] = useState<PedidoEmitterProfile>(() =>
     loadPedidoEmitterProfile(tenantKey)
   );
@@ -1075,14 +1042,13 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     });
   };
 
-  const resetEmitterToFictitious = () => {
-    setEmitter(DEFAULT_FICTITIOUS_EMITTER);
-    savePedidoEmitterProfile(tenantKey, DEFAULT_FICTITIOUS_EMITTER);
+  const resetEmitterToDefault = () => {
+    setEmitter(DEFAULT_EMITTER_PROFILE);
+    savePedidoEmitterProfile(tenantKey, DEFAULT_EMITTER_PROFILE);
   };
 
   const openNewForm = () => {
     setEditingId(undefined);
-    setDemoPreviewNote(null);
     setNumero(nextNoteNumber);
     const today = toISODate();
     setDataEntrada(today);
@@ -1109,9 +1075,8 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
   };
 
   const openEditForm = (note: NoteRecord) => {
-    setEditingId(note.id === '__demo_a5__' ? undefined : note.id);
-    setDemoPreviewNote(null);
-    setNumero(note.id === '__demo_a5__' ? nextNoteNumber : note.numero);
+    setEditingId(note.id);
+    setNumero(note.numero);
     setDataEntrada(note.data || toISODate());
     setDataSaida(note.dataSaida || '');
     setSelectedCompanyId(note.empresaId || 'manual');
@@ -1121,7 +1086,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     setInscricao(note.inscricao || '');
     setFone(note.contato || '');
     setEndereco(note.endereco || '');
-    setStatus(note.id === '__demo_a5__' ? 'emitida' : note.status);
+    setStatus(note.status);
     setItems(
       note.items.length > 0
         ? note.items.map((it) => ({ ...it }))
@@ -1139,31 +1104,12 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     setViewMode('form');
   };
 
-  const openFictitiousDemoPreview = () => {
-    const demo = createFictitiousDemoNote(nextNoteNumber);
-    setDemoPreviewNote(demo);
-    setPreviewNoteId(null);
-    setViewMode('preview');
-  };
-
-  const handleFillFictitiousInForm = () => {
-    const demo = createFictitiousDemoNote(numero);
-    setSelectedCompanyId('manual');
-    setSelectedOrderId('');
-    setClienteNome(demo.clienteNome);
-    setCnpjCpf(demo.cnpj);
-    setInscricao(demo.inscricao || 'ISENTO');
-    setFone(demo.contato);
-    setEndereco(demo.endereco || '');
-    setDataEntrada(demo.data);
-    setDataSaida(demo.dataSaida || demo.data);
-    setItems(
-      demo.items.map((it, idx) => ({
-        ...it,
-        id: `IT-${Date.now()}-${idx + 1}`,
-      }))
-    );
-    setFormError(null);
+  const sanitizeImportedDoc = (raw?: string): string => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits || /^0+$/.test(digits) || digits === '00000000000100') {
+      return '';
+    }
+    return formatCpfCnpjMask(digits);
   };
 
   const handleCompanySelect = (compId: string) => {
@@ -1172,7 +1118,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     const comp = companies.find((c) => c.id === compId);
     if (comp) {
       setClienteNome(comp.corporateName);
-      setCnpjCpf(formatCpfCnpjMask(comp.cnpj));
+      setCnpjCpf(sanitizeImportedDoc(comp.cnpj));
       setFone(formatPhoneMask(comp.phone));
       if (comp.city && !endereco.trim()) {
         setEndereco(comp.city);
@@ -1190,7 +1136,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     if (comp) {
       setSelectedCompanyId(comp.id);
       setClienteNome(comp.corporateName);
-      setCnpjCpf(formatCpfCnpjMask(comp.cnpj));
+      setCnpjCpf(sanitizeImportedDoc(comp.cnpj));
       setFone(formatPhoneMask(comp.phone || ord.companyPhone));
       setEndereco(comp.city || '');
     } else {
@@ -1344,9 +1290,9 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     }
 
     const docDigits = cnpjCpf.replace(/\D/g, '');
-    if (docDigits.length > 0 && !isValidCpfOrCnpj(cnpjCpf)) {
+    if (docDigits.length > 0 && docDigits.length !== 11 && docDigits.length !== 14) {
       setFormError(
-        'CNPJ/CPF inválido. Informe 11 dígitos (CPF) ou 14 dígitos (CNPJ) válidos, ou deixe em branco.'
+        'CNPJ/CPF incompleto. Informe 11 dígitos (CPF) ou 14 dígitos (CNPJ), ou deixe em branco.'
       );
       return;
     }
@@ -1393,11 +1339,12 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
       );
 
       if (saved) {
-        setDemoPreviewNote(null);
         setPreviewNoteId(saved.id);
         setViewMode('preview');
       } else {
-        setViewMode('list');
+        setFormError(
+          'Não foi possível salvar a nota no banco de dados. Verifique sua conexão e tente novamente.'
+        );
       }
     } finally {
       setIsSaving(false);
@@ -1417,9 +1364,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
     );
   }, [notas, globalSearchQuery]);
 
-  const previewNote =
-    demoPreviewNote || notas.find((n) => n.id === previewNoteId) || null;
-  const isDemoPreview = previewNote?.id === '__demo_a5__';
+  const previewNote = notas.find((n) => n.id === previewNoteId) || null;
 
   useEffect(() => {
     if (!onSyncPrintPreview) return;
@@ -1452,15 +1397,6 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={openFictitiousDemoPreview}
-                className="liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-indigo-600" />
-                <span>Ver Modelo A5</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setShowEmitterPanel((v) => !v)}
                 className={`liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer ${
                   showEmitterPanel
@@ -1483,26 +1419,25 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
             </div>
           </div>
 
-          {/* Collapsible Emitter Header Config (strictly fictitious defaults) */}
+          {/* Collapsible Emitter Header Config */}
           {showEmitterPanel && (
             <div className="liquid-glass rounded-[28px] p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    Dados do Cabeçalho do Pedido (Protótipo Fictício)
+                    Dados do Cabeçalho do Pedido
                   </h3>
                   <p className="text-[11px] font-medium text-slate-600">
-                    Por padrão utiliza marca e contatos fictícios. Edite aqui se
-                    desejar personalizar a impressão A5 localmente.
+                    Personalize a marca, contatos e endereço exibidos na impressão A5.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={resetEmitterToFictitious}
+                  onClick={resetEmitterToDefault}
                   className="liquid-glass-pill min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Restaurar Fictício</span>
+                  <span>Restaurar Padrão</span>
                 </button>
               </div>
 
@@ -1641,22 +1576,14 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
               {filteredNotas.length === 0 ? (
                 <div className="py-10 px-4 text-center space-y-3">
                   <p className="font-medium text-xs text-slate-600">
-                    Nenhum pedido emitido ainda. Crie um novo pedido a partir de
-                    uma OS ou visualize o modelo A5 fictício.
+                    Nenhum pedido emitido ainda. Clique em{' '}
+                    <strong>Novo Pedido</strong> para preencher com dados da OS.
                   </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button
-                      type="button"
-                      onClick={openFictitiousDemoPreview}
-                      className="liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Ver Modelo A5</span>
-                    </button>
+                  <div className="flex items-center justify-center pt-1">
                     <button
                       type="button"
                       onClick={openNewForm}
-                      className="min-h-[44px] px-4 py-2 rounded-full text-xs font-bold bg-indigo-600 text-white inline-flex items-center gap-1.5 cursor-pointer"
+                      className="min-h-[44px] px-5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>Novo Pedido</span>
@@ -1730,7 +1657,6 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setDemoPreviewNote(null);
                             setPreviewNoteId(note.id);
                             setViewMode('preview');
                           }}
@@ -1803,22 +1729,13 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                         <p className="font-medium text-slate-600">
                           Nenhum pedido emitido ainda. Clique em{' '}
                           <strong>Novo Pedido</strong> para preencher com dados
-                          da OS ou clique em <strong>Ver Modelo A5</strong> para
-                          visualizar o protótipo imprimível.
+                          da OS.
                         </p>
-                        <div className="inline-flex items-center gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={openFictitiousDemoPreview}
-                            className="liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Sparkles className="w-4 h-4" />
-                            <span>Ver Modelo A5 (Fictício)</span>
-                          </button>
+                        <div className="flex items-center justify-center pt-1">
                           <button
                             type="button"
                             onClick={openNewForm}
-                            className="min-h-[44px] px-4 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1.5 cursor-pointer"
+                            className="min-h-[44px] px-5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                           >
                             <Plus className="w-4 h-4" />
                             <span>Novo Pedido</span>
@@ -1875,7 +1792,6 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setDemoPreviewNote(null);
                                   setPreviewNoteId(note.id);
                                   setViewMode('preview');
                                 }}
@@ -1906,7 +1822,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                               <button
                                 type="button"
                                 onClick={() => onDeleteNote(note.id)}
-                                className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 cursor-pointer"
+                                className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                                 title="Excluir pedido"
                                 aria-label="Excluir pedido"
                               >
@@ -1965,15 +1881,6 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                   </option>
                 ))}
               </select>
-
-              <button
-                type="button"
-                onClick={handleFillFictitiousInForm}
-                className="liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Dados Fictícios</span>
-              </button>
             </div>
           </div>
 
@@ -2346,7 +2253,6 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setDemoPreviewNote(null);
                   setViewMode('list');
                 }}
                 className="liquid-glass-pill min-h-[44px] min-w-[44px] rounded-full text-slate-800 inline-flex items-center justify-center cursor-pointer shrink-0"
@@ -2357,11 +2263,7 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
               <div className="min-w-0">
                 <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 flex-wrap">
                   <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>
-                    {isDemoPreview
-                      ? `Modelo Fictício — Pedido Nº ${formatPedidoNumber(previewNote.numero)}`
-                      : `Pedido Nº ${formatPedidoNumber(previewNote.numero)}`}
-                  </span>
+                  <span>Pedido Nº {formatPedidoNumber(previewNote.numero)}</span>
                 </h3>
                 <p className="text-[11px] font-medium text-slate-600">
                   Formato A5 Retrato (148 × 210 mm) • 15 linhas • Total
@@ -2377,15 +2279,13 @@ export const NotesSection: React.FC<NotesSectionProps> = ({
                 className="liquid-glass-pill min-h-[44px] px-4 py-2 rounded-full text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Edit3 className="w-4 h-4 text-indigo-600" />
-                <span>{isDemoPreview ? 'Editar / Salvar' : 'Editar'}</span>
+                <span>Editar</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => {
-                  if (!isDemoPreview) {
-                    onMarkNotePrinted(previewNote.id);
-                  }
+                  onMarkNotePrinted(previewNote.id);
                   onTriggerPrint(previewNote, emitter);
                 }}
                 className="min-h-[44px] px-5 py-2 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md inline-flex items-center gap-1.5 cursor-pointer"

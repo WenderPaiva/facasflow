@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  BarChart3,
   CalendarClock,
   Check,
   Copy,
@@ -35,8 +36,14 @@ import {
 import { CollaboratorsSubsection } from './CollaboratorsSubsection';
 import { ExpensesSection } from './ExpensesSection';
 import { InvestmentsSubsection } from './InvestmentsSubsection';
+import { MonthlyReportSubsection } from './MonthlyReportSubsection';
 
-type FinanceTab = 'visao' | 'despesas' | 'colaboradores' | 'investimentos';
+type FinanceTab =
+  | 'visao'
+  | 'despesas'
+  | 'colaboradores'
+  | 'investimentos'
+  | 'relatorio_mensal';
 
 interface FinanceAnalyticsSectionProps {
   orders: DieOrder[];
@@ -168,6 +175,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
               { id: 'despesas', label: 'Despesas', icon: Receipt },
               { id: 'colaboradores', label: 'Colaboradores', icon: Users },
               { id: 'investimentos', label: 'Investimentos', icon: TrendingUp },
+              { id: 'relatorio_mensal', label: 'Relatório Mensal', icon: BarChart3 },
             ] as const
           ).map((tab) => {
             const Icon = tab.icon;
@@ -190,6 +198,16 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
           })}
         </div>
       </div>
+
+      {activeTab === 'relatorio_mensal' && (
+        <MonthlyReportSubsection
+          orders={orders}
+          despesas={despesas}
+          serviceProviders={serviceProviders}
+          payrollEmployees={payrollEmployees}
+          investments={investments}
+        />
+      )}
 
       {activeTab === 'despesas' && (
         <ExpensesSection
@@ -560,7 +578,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                           <span>WhatsApp</span>
                         </a>
 
-                        {order.paymentStatus === 'sem_nota' ? (
+                        {order.paymentStatus === 'sem_nota' && (
                           <button
                             type="button"
                             onClick={() => onEmitBilling30d(order.id)}
@@ -569,35 +587,35 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                             <Sparkles className="w-4 h-4" />
                             <span>Gerar 30d</span>
                           </button>
-                        ) : order.paymentStatus !== 'nao_pago' ? (
-                          <button
-                            type="button"
-                            onClick={() => onTogglePaid(order.id)}
-                            className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
-                              order.paymentStatus === 'pago'
-                                ? 'liquid-glass-pill text-slate-700'
-                                : 'bg-emerald-600 text-white'
-                            }`}
-                          >
-                            {order.paymentStatus === 'pago' ? (
-                              <>
-                                <RotateCcw className="w-4 h-4" />
-                                <span>Reabrir</span>
-                              </>
-                            ) : (
-                              <>
-                                <Check className="w-4 h-4" />
-                                <span>Marcar Pago</span>
-                              </>
-                            )}
-                          </button>
-                        ) : null}
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => onTogglePaid(order.id)}
+                          className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
+                            order.paymentStatus === 'pago'
+                              ? 'liquid-glass-pill text-slate-700'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
+                          }`}
+                        >
+                          {order.paymentStatus === 'pago' ? (
+                            <>
+                              <RotateCcw className="w-4 h-4" />
+                              <span>Reabrir</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span>Marcar como pago</span>
+                            </>
+                          )}
+                        </button>
 
                         <button
                           type="button"
                           onClick={() => onDeleteOrder(order.id)}
-                          aria-label="Apagar esta OS"
-                          className="min-h-[44px] min-w-[44px] rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 inline-flex items-center justify-center cursor-pointer"
+                          aria-label="Excluir esta OS"
+                          className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -727,7 +745,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                                 <span>Cobrar no WhatsApp</span>
                               </a>
 
-                              {order.paymentStatus === 'sem_nota' ? (
+                              {order.paymentStatus === 'sem_nota' && (
                                 <button
                                   type="button"
                                   onClick={() => onEmitBilling30d(order.id)}
@@ -736,35 +754,36 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                                   <Sparkles className="w-3.5 h-3.5" />
                                   <span>Gerar 30d</span>
                                 </button>
-                              ) : order.paymentStatus !== 'nao_pago' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onTogglePaid(order.id)}
-                                  className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
-                                    order.paymentStatus === 'pago'
-                                      ? 'liquid-glass-pill text-slate-700'
-                                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-                                  }`}
-                                >
-                                  {order.paymentStatus === 'pago' ? (
-                                    <>
-                                      <RotateCcw className="w-3 h-3" />
-                                      <span>Reabrir</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                                      <span>Marcar Pago</span>
-                                    </>
-                                  )}
-                                </button>
-                              ) : null}
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => onTogglePaid(order.id)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+                                  order.paymentStatus === 'pago'
+                                    ? 'liquid-glass-pill text-slate-700'
+                                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
+                                }`}
+                              >
+                                {order.paymentStatus === 'pago' ? (
+                                  <>
+                                    <RotateCcw className="w-3 h-3" />
+                                    <span>Reabrir</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    <span>Marcar como pago</span>
+                                  </>
+                                )}
+                              </button>
 
                               <button
                                 type="button"
                                 onClick={() => onDeleteOrder(order.id)}
-                                className="p-1.5 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
-                                title="Apagar esta OS"
+                                className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                                title="Excluir esta OS"
+                                aria-label="Excluir esta OS"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>

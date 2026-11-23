@@ -285,8 +285,9 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                       <button
                         type="button"
                         onClick={() => onDeleteDelivery(del.id)}
-                        className="p-2.5 rounded-2xl bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
-                        title="Apagar registro de entrega"
+                        className="btn-compact w-9 h-9 rounded-2xl bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        title="Excluir registro de entrega"
+                        aria-label="Excluir registro de entrega"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

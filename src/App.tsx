@@ -44,6 +44,8 @@ import {
   dbDismissBackupAlert,
   dbLoadSettingsAndBackups,
   dbMoveOrderStage,
+  dbRegisterStockMovement,
+  dbRevertStockMovement,
   dbSaveNote,
   dbSoftDeleteCompany,
   dbSoftDeleteDelivery,
@@ -102,6 +104,7 @@ import {
   ReturnStatus,
   ServiceProviderRecord,
   StockItem,
+  StockMovementRecord,
   UserRole,
   WarrantyReturnRecord,
 } from './types/order';
@@ -130,6 +133,7 @@ function createEmptyDb(companyId = ''): EnterpriseDatabase {
     deliveries: [],
     returns: [],
     stock: [],
+    stockMovements: [],
     notas: [],
     noteSequence: 0,
     despesas: [],
@@ -192,30 +196,54 @@ export const App: React.FC = () => {
   const [toast, setToast] = useState<{
     message: string;
     variant?: 'ok' | 'err';
+    actionLabel?: string;
+    onAction?: () => void;
   } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
-  const showToast = useCallback((message: string, variant: 'ok' | 'err' = 'ok') => {
-    setToast({ message, variant });
-    window.setTimeout(() => {
-      setToast((prev) => (prev?.message === message ? null : prev));
-    }, 3800);
-  }, []);
-
-  const refreshSettingsAndBackups = useCallback(async (empresaId: string, role: UserRole) => {
-    if (role !== 'admin' || !empresaId) return;
-    setSettingsState((prev) => ({ ...prev, loading: true }));
-    try {
-      const res = await dbLoadSettingsAndBackups(empresaId);
-      setSettingsState({
-        settings: res.settings,
-        backups: res.backups,
-        logs: res.logs,
-        loading: false,
+  const showToast = useCallback(
+    (
+      message: string,
+      variant: 'ok' | 'err' = 'ok',
+      action?: { label: string; onClick: () => void }
+    ) => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      setToast({
+        message,
+        variant,
+        actionLabel: action?.label,
+        onAction: action?.onClick,
       });
-    } catch {
-      setSettingsState((prev) => ({ ...prev, loading: false }));
-    }
-  }, []);
+      toastTimerRef.current = window.setTimeout(
+        () => {
+          setToast((prev) => (prev?.message === message ? null : prev));
+        },
+        action ? 7000 : 3800
+      );
+    },
+    []
+  );
+
+  const refreshSettingsAndBackups = useCallback(
+    async (empresaId: string, isSuperAdmin?: boolean) => {
+      if (!isSuperAdmin || !empresaId) return;
+      setSettingsState((prev) => ({ ...prev, loading: true }));
+      try {
+        const res = await dbLoadSettingsAndBackups(empresaId);
+        setSettingsState({
+          settings: res.settings,
+          backups: res.backups,
+          logs: res.logs,
+          loading: false,
+        });
+      } catch {
+        setSettingsState((prev) => ({ ...prev, loading: false }));
+      }
+    },
+    []
+  );
 
   const hydrateFromSupabase = useCallback(
     async (activeSession: AuthSession) => {
@@ -233,8 +261,8 @@ export const App: React.FC = () => {
             ? prev
             : loaded.companies[0]?.id || null
         );
-        if (activeSession.role === 'admin') {
-          await refreshSettingsAndBackups(targetEmpresaId, activeSession.role);
+        if (activeSession.isSuperAdmin) {
+          await refreshSettingsAndBackups(targetEmpresaId, activeSession.isSuperAdmin);
         }
       } catch (err: any) {
         setDbError(
@@ -265,9 +293,13 @@ export const App: React.FC = () => {
           tipo: 'automatico',
           debounced: true,
         });
-        await refreshSettingsAndBackups(empresaId, 'admin');
+        if (active.isSuperAdmin) {
+          await refreshSettingsAndBackups(empresaId, true);
+        }
       } catch {
-        await refreshSettingsAndBackups(empresaId, 'admin');
+        if (active.isSuperAdmin) {
+          await refreshSettingsAndBackups(empresaId, true);
+        }
       }
     }, 15000);
   }, [settingsState.settings.backup_automatico, refreshSettingsAndBackups]);
@@ -408,6 +440,10 @@ export const App: React.FC = () => {
   };
 
   const handleSelectSection = (target: ActiveSection) => {
+    if (target === 'configuracoes' && !session?.isSuperAdmin) {
+      setActiveSection(session?.role === 'operador' ? 'esteira' : 'bento_home');
+      return;
+    }
     if (
       session?.role === 'operador' &&
       !OPERATOR_ALLOWED_SECTIONS.includes(target)
@@ -663,7 +699,7 @@ export const App: React.FC = () => {
 
     const today = toISODate();
     const isPaid = order.paymentStatus === 'pago';
-    const nextStatus: PaymentStatus = isPaid ? 'a_receber' : 'pago';
+    const nextStatus: PaymentStatus = isPaid ? 'nao_pago' : 'pago';
     const nextPaidAt = isPaid ? null : today;
     const nextVersion = (Number(order.version) || 1) + 1;
 
@@ -688,7 +724,11 @@ export const App: React.FC = () => {
         ),
       }));
       scheduleAutoBackup();
-      showToast(`Status financeiro de ${orderId} atualizado!`);
+      showToast(
+        nextStatus === 'pago'
+          ? `${orderId} marcada como paga!`
+          : `${orderId} reaberta como Não Pago.`
+      );
     } catch (err: any) {
       showToast(err?.message || 'Erro ao atualizar pagamento.', 'err');
     }
@@ -872,11 +912,11 @@ export const App: React.FC = () => {
     }
   };
 
-  // Seção 6 • Estoque (Mantém UI e regras de negócio originais; persistência real + soft delete no Supabase)
+  // Seção 6 • Estoque (CRUD restrito a admin; consumo rápido e estorno liberados para admin e operador)
   const handleAddStockItem = async (
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
   ) => {
-    if (!session || session.role === 'cliente') return;
+    if (!session || session.role !== 'admin') return;
     try {
       const code = getNextStockId(db);
       const created = await dbCreateStockItem(empresaId, code, payload);
@@ -895,7 +935,7 @@ export const App: React.FC = () => {
     id: string,
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
   ) => {
-    if (!session || session.role === 'cliente') return;
+    if (!session || session.role !== 'admin') return;
     const target = (db.stock || []).find((item) => item.id === id);
     if (!target?.dbUuid) return;
     try {
@@ -914,7 +954,7 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteStockItem = async (id: string) => {
-    if (!session || session.role === 'cliente') return;
+    if (!session || session.role !== 'admin') return;
     const target = (db.stock || []).find((item) => item.id === id);
     if (!target?.dbUuid) return;
     try {
@@ -927,6 +967,120 @@ export const App: React.FC = () => {
       showToast(`Item ${id} removido do estoque!`);
     } catch (err: any) {
       showToast(err?.message || 'Erro ao excluir item de estoque.', 'err');
+    }
+  };
+
+  const handleRevertStockMovement = async (movement: StockMovementRecord) => {
+    if (!session || session.role === 'cliente') return;
+    const currentItem = (dbRef.current.stock || []).find(
+      (i) => i.dbUuid === movement.stockItemUuid
+    );
+    if (!currentItem) {
+      showToast('Insumo não localizado para desfazer a movimentação.', 'err');
+      return;
+    }
+    try {
+      const { updatedItem, revertedAt, estornoMovement } =
+        await dbRevertStockMovement(
+          empresaId,
+          movement,
+          currentItem,
+          session.ownerName
+        );
+      setDb((prev) => ({
+        ...prev,
+        stock: (prev.stock || []).map((it) =>
+          it.dbUuid === updatedItem.dbUuid ? updatedItem : it
+        ),
+        stockMovements: [
+          estornoMovement,
+          ...(prev.stockMovements || []).map((m) =>
+            m.id === movement.id ? { ...m, revertedAt } : m
+          ),
+        ],
+      }));
+      scheduleAutoBackup();
+      showToast(
+        `Movimentação desfeita! Saldo de "${updatedItem.name}": ${updatedItem.quantity} ${updatedItem.unit}.`
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao desfazer movimentação.', 'err');
+    }
+  };
+
+  const handleQuickConsumeStock = async (
+    item: StockItem,
+    quantity: number,
+    note?: string
+  ) => {
+    if (!session || session.role === 'cliente') return;
+    try {
+      const { updatedItem, movement } = await dbRegisterStockMovement(
+        empresaId,
+        item,
+        -Math.abs(quantity),
+        session.ownerName,
+        note
+      );
+      setDb((prev) => ({
+        ...prev,
+        stock: (prev.stock || []).map((it) =>
+          it.dbUuid === updatedItem.dbUuid ? updatedItem : it
+        ),
+        stockMovements: [movement, ...(prev.stockMovements || [])],
+      }));
+      scheduleAutoBackup();
+      showToast(
+        `Baixa registrada: -${movement.quantity} ${movement.unit} de "${movement.itemName}" (Saldo: ${updatedItem.quantity})`,
+        'ok',
+        {
+          label: 'Desfazer',
+          onClick: () => {
+            setToast(null);
+            handleRevertStockMovement(movement);
+          },
+        }
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao registrar baixa de estoque.', 'err');
+    }
+  };
+
+  const handleQuickReplenishStock = async (
+    item: StockItem,
+    quantity: number,
+    note?: string
+  ) => {
+    if (!session || session.role !== 'admin') return;
+    try {
+      const { updatedItem, movement } = await dbRegisterStockMovement(
+        empresaId,
+        item,
+        Math.abs(quantity),
+        session.ownerName,
+        note
+      );
+      setDb((prev) => ({
+        ...prev,
+        stock: (prev.stock || []).map((it) =>
+          it.dbUuid === updatedItem.dbUuid ? updatedItem : it
+        ),
+        stockMovements: [movement, ...(prev.stockMovements || [])],
+      }));
+      scheduleAutoBackup();
+      showToast(
+        `Reposição registrada: +${movement.quantity} ${movement.unit} em "${movement.itemName}" (Saldo: ${updatedItem.quantity})`,
+        'ok',
+        {
+          label: 'Desfazer',
+          onClick: () => {
+            setToast(null);
+            handleRevertStockMovement(movement);
+          },
+        }
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao repor estoque.', 'err');
     }
   };
 
@@ -1339,12 +1493,16 @@ export const App: React.FC = () => {
     );
   }
 
-  // Enforce RBAC section access
+  // Enforce RBAC + Super Admin section access
   const effectiveSection: ActiveSection =
-    session.role === 'operador' &&
-    !OPERATOR_ALLOWED_SECTIONS.includes(activeSection)
-      ? 'esteira'
-      : activeSection;
+    activeSection === 'configuracoes' && !session.isSuperAdmin
+      ? session.role === 'operador'
+        ? 'esteira'
+        : 'bento_home'
+      : session.role === 'operador' &&
+          !OPERATOR_ALLOWED_SECTIONS.includes(activeSection)
+        ? 'esteira'
+        : activeSection;
 
   const printPages = printJob
     ? chunkNoteItems(printJob.note.items, PEDIDO_A5_ROWS)
@@ -1367,6 +1525,7 @@ export const App: React.FC = () => {
             onSelectSection={handleSelectSection}
             tenantName={session.companyName}
             userRole={session.role}
+            isSuperAdmin={Boolean(session.isSuperAdmin)}
             userName={session.ownerName}
             onLogout={handleLogout}
             counts={counts}
@@ -1381,6 +1540,7 @@ export const App: React.FC = () => {
               onOpenNewOrder={() => setIsNewModalOpen(true)}
               tenantName={session.companyName}
               userRole={session.role}
+              isSuperAdmin={Boolean(session.isSuperAdmin)}
               userName={session.ownerName}
               realtimeStatus={realtimeStatus}
               onLogout={handleLogout}
@@ -1389,8 +1549,8 @@ export const App: React.FC = () => {
 
             {/* Main Content Container */}
             <main className="flex-1 flex flex-col gap-5 min-w-0">
-              {/* Global Admin Alert Banner if a Backup Failure is Unresolved */}
-              {session.role === 'admin' &&
+              {/* Global Super Admin Alert Banner if a Backup Failure is Unresolved */}
+              {session.isSuperAdmin &&
                 unDismissedAlerts.length > 0 &&
                 effectiveSection !== 'configuracoes' && (
                   <div className="rounded-[22px] bg-rose-500/15 border border-rose-500/70 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1537,11 +1697,16 @@ export const App: React.FC = () => {
 
               {effectiveSection === 'estoque' && (
                 <StockSection
+                  userRole={session.role}
                   items={db.stock || []}
+                  movements={db.stockMovements || []}
                   globalSearchQuery={searchQuery}
                   onAddItem={handleAddStockItem}
                   onUpdateItem={handleUpdateStockItem}
                   onDeleteItem={handleDeleteStockItem}
+                  onQuickConsume={handleQuickConsumeStock}
+                  onQuickReplenish={handleQuickReplenishStock}
+                  onRevertMovement={handleRevertStockMovement}
                 />
               )}
 
@@ -1572,7 +1737,7 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {session.role === 'admin' &&
+              {session.isSuperAdmin &&
                 effectiveSection === 'configuracoes' && (
                   <SettingsBackupsSection
                     empresaId={empresaId}
@@ -1582,7 +1747,7 @@ export const App: React.FC = () => {
                     logs={settingsState.logs}
                     loading={settingsState.loading}
                     onRefresh={() =>
-                      refreshSettingsAndBackups(empresaId, session.role)
+                      refreshSettingsAndBackups(empresaId, session.isSuperAdmin)
                     }
                     onUpdateSettings={async (updates) => {
                       const updated = await dbUpdateCompanySettings(
@@ -1620,7 +1785,7 @@ export const App: React.FC = () => {
               toast.variant === 'err'
                 ? 'ring-rose-500/70 text-rose-900'
                 : 'ring-indigo-400/50 text-slate-900'
-            } text-xs font-bold shadow-2xl flex items-center gap-2`}
+            } text-xs font-bold shadow-2xl flex items-center gap-2.5`}
           >
             {toast.variant === 'err' ? (
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -1628,6 +1793,15 @@ export const App: React.FC = () => {
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             )}
             <span className="break-words">{toast.message}</span>
+            {toast.actionLabel && toast.onAction && (
+              <button
+                type="button"
+                onClick={toast.onAction}
+                className="btn-compact ml-1 px-3 py-1 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-extrabold shadow-sm transition cursor-pointer shrink-0"
+              >
+                {toast.actionLabel}
+              </button>
+            )}
           </div>
         )}
 

@@ -226,8 +226,9 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                           e.stopPropagation();
                           onDeleteCompany(comp.id);
                         }}
-                        className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
-                        title="Apagar empresa e facas vinculadas"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        title="Excluir empresa e facas vinculadas"
+                        aria-label="Excluir empresa"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -285,8 +286,9 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                   <button
                     type="button"
                     onClick={() => onDeleteCompany(activeCompany.id)}
-                    className="p-3.5 rounded-2xl liquid-glass-pill text-slate-600 hover:text-rose-700 transition cursor-pointer"
-                    title="Apagar esta empresa"
+                    className="btn-compact w-10 h-10 rounded-2xl liquid-glass-pill text-slate-600 hover:text-rose-700 flex items-center justify-center transition cursor-pointer shrink-0"
+                    title="Excluir esta empresa"
+                    aria-label="Excluir empresa"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -416,10 +418,11 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                           <button
                             type="button"
                             onClick={() => onDeleteOrder(order.id)}
-                            className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
-                            title="Apagar esta OS / Faca"
+                            className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                            title="Excluir esta OS / Faca"
+                            aria-label="Excluir ordem de serviço"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>

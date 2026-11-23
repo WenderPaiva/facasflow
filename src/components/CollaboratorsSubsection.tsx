@@ -392,8 +392,9 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                           setProvDueDate(p.dueDate);
                           setProvStatus(p.status);
                         }}
-                        className="p-2 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 cursor-pointer"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Editar prestador"
+                        aria-label="Editar prestador"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
@@ -403,8 +404,9 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                           if (editProvId === p.id) resetProviderForm();
                           onDeleteProvider(p.id);
                         }}
-                        className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 cursor-pointer"
-                        title="Remover prestador"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        title="Excluir prestador"
+                        aria-label="Excluir prestador"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -551,8 +553,9 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                         setEmpSalary(emp.salary);
                         setEmpAdmissionDate(emp.admissionDate);
                       }}
-                      className="p-2 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 cursor-pointer"
+                      className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                       title="Editar funcionário"
+                      aria-label="Editar funcionário"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
@@ -562,8 +565,9 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                         if (editEmpId === emp.id) resetEmployeeForm();
                         onDeletePayrollEmployee(emp.id);
                       }}
-                      className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 cursor-pointer"
-                      title="Remover funcionário"
+                      className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                      title="Excluir funcionário"
+                      aria-label="Excluir funcionário"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

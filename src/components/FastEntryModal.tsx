@@ -229,6 +229,9 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
                   );
                 })}
               </div>
+              <p className="text-[11px] font-medium text-slate-600 mt-1.5">
+                Toda OS entra automaticamente com status <strong>Não Pago</strong> até confirmação manual em &quot;Marcar como pago&quot;.
+              </p>
             </div>
           </div>
 

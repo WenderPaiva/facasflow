@@ -3,20 +3,37 @@ import {
   AlertTriangle,
   Boxes,
   Check,
+  Clock,
   Edit3,
+  History,
   Layers,
   Minus,
   Package,
+  PackageMinus,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
+  User,
   X,
 } from 'lucide-react';
-import { StockCategory, StockItem } from '../types/order';
-import { formatBRL, formatDateBR, toISODate } from '../utils/financeEngine';
+import {
+  StockCategory,
+  StockItem,
+  StockMovementRecord,
+  UserRole,
+} from '../types/order';
+import {
+  formatBRL,
+  formatDateBR,
+  formatDateTimeGoiasBR,
+  toISODate,
+} from '../utils/financeEngine';
 
 interface StockSectionProps {
+  userRole: UserRole;
   items: StockItem[];
+  movements: StockMovementRecord[];
   globalSearchQuery: string;
   onAddItem: (
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
@@ -26,6 +43,17 @@ interface StockSectionProps {
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
   ) => void;
   onDeleteItem: (id: string) => void;
+  onQuickConsume: (
+    item: StockItem,
+    quantity: number,
+    note?: string
+  ) => Promise<void>;
+  onQuickReplenish: (
+    item: StockItem,
+    quantity: number,
+    note?: string
+  ) => Promise<void>;
+  onRevertMovement: (movement: StockMovementRecord) => Promise<void>;
 }
 
 const CATEGORY_META: Record<
@@ -51,24 +79,38 @@ const CATEGORY_META: Record<
     label: '2. Lâminas',
     shortLabel: 'Lâminas',
     description: 'Lâminas de corte, vinco, picote e serrilha',
-    defaultUnit: 'm',
-    unitPresets: ['m', 'rolo', 'un', 'cx'],
+    defaultUnit: 'cx',
+    unitPresets: ['cx', 'm', 'rolo', 'un'],
     badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-300/60',
   },
 };
 
 export const StockSection: React.FC<StockSectionProps> = ({
+  userRole,
   items,
+  movements,
   globalSearchQuery,
   onAddItem,
   onUpdateItem,
   onDeleteItem,
+  onQuickConsume,
+  onQuickReplenish,
+  onRevertMovement,
 }) => {
+  const isOperator = userRole === 'operador';
   const [categoryFilter, setCategoryFilter] = useState<'todos' | StockCategory>(
     'todos'
   );
   const [onlyLowStock, setOnlyLowStock] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
+
+  // Quick Consumption State
+  const [selectedConsumeId, setSelectedConsumeId] = useState<string>('');
+  const [customConsumeQty, setCustomConsumeQty] = useState<string>('1');
+  const [consumeNote, setConsumeNote] = useState<string>('');
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [busyMoveId, setBusyMoveId] = useState<string | null>(null);
+  const [showFullHistory, setShowFullHistory] = useState(false);
 
   // Form state (Create / Edit)
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -135,19 +177,67 @@ export const StockSection: React.FC<StockSectionProps> = ({
     resetForm(category);
   };
 
-  const handleQuickAdjustQuantity = (item: StockItem, delta: number) => {
-    const nextQty = Math.max(0, Number((item.quantity + delta).toFixed(2)));
-    onUpdateItem(item.id, {
-      category: item.category,
-      name: item.name,
-      quantity: nextQty,
-      unit: item.unit,
-      minStock: item.minStock,
-      supplier: item.supplier,
-      unitCost: item.unitCost,
-      entryDate: item.entryDate,
-    });
+  const handleTriggerConsume = async (
+    item: StockItem,
+    qty: number,
+    note?: string
+  ) => {
+    if (busyItemId || qty <= 0 || item.quantity <= 0) return;
+    setBusyItemId(item.id);
+    try {
+      await onQuickConsume(item, qty, note);
+    } finally {
+      setBusyItemId(null);
+    }
   };
+
+  const handleTriggerReplenish = async (item: StockItem, qty: number) => {
+    if (busyItemId || qty <= 0) return;
+    setBusyItemId(item.id);
+    try {
+      await onQuickReplenish(item, qty, 'Reposição rápida');
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const handleCustomConsumeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetItem =
+      items.find((i) => i.id === selectedConsumeId) || items[0];
+    if (!targetItem) return;
+    const qty = Math.max(
+      0.01,
+      parseFloat(customConsumeQty.replace(',', '.')) || 1
+    );
+    await handleTriggerConsume(targetItem, qty, consumeNote.trim() || undefined);
+    setCustomConsumeQty('1');
+    setConsumeNote('');
+  };
+
+  const handleUndo = async (mov: StockMovementRecord) => {
+    if (busyMoveId || mov.revertedAt || mov.type === 'estorno') return;
+    setBusyMoveId(mov.id);
+    try {
+      await onRevertMovement(mov);
+    } finally {
+      setBusyMoveId(null);
+    }
+  };
+
+  // Highlighted quick-action items: prioritize primary Madeira & primary Lâmina first, then up to 6 total
+  const quickActionItems = useMemo(() => {
+    const madeiras = items.filter((i) => i.category === 'madeiras');
+    const laminas = items.filter((i) => i.category === 'laminas');
+    const ordered: StockItem[] = [];
+    if (madeiras[0]) ordered.push(madeiras[0]);
+    if (laminas[0]) ordered.push(laminas[0]);
+    for (const item of [...madeiras.slice(1), ...laminas.slice(1)]) {
+      if (ordered.length >= 6) break;
+      ordered.push(item);
+    }
+    return ordered;
+  }, [items]);
 
   const combinedQuery = (localSearch || globalSearchQuery).trim().toLowerCase();
 
@@ -187,6 +277,8 @@ export const StockSection: React.FC<StockSectionProps> = ({
     (sum, item) => sum + (item.quantity || 0) * (item.unitCost || 0),
     0
   );
+
+  const visibleMovements = showFullHistory ? movements : movements.slice(0, 6);
 
   const inputClass =
     'liquid-glass-pill w-full px-3.5 py-2.5 text-xs rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
@@ -240,6 +332,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
               const isLow = item.quantity <= item.minStock;
               const isBeingEdited = editingId === item.id;
               const totalValue = item.quantity * item.unitCost;
+              const isBusy = busyItemId === item.id;
 
               return (
                 <div
@@ -299,16 +392,18 @@ export const StockSection: React.FC<StockSectionProps> = ({
                       </div>
                     </div>
 
-                    {/* Quantity + Actions */}
+                    {/* Quantity + Centered Actions */}
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <div className="flex items-center gap-1.5 bg-white/60 border border-white/80 rounded-2xl px-2.5 py-1.5">
                         <button
                           type="button"
-                          onClick={() => handleQuickAdjustQuantity(item, -1)}
-                          className="w-6 h-6 rounded-full bg-white/80 hover:bg-indigo-600 text-slate-700 hover:text-white flex items-center justify-center transition cursor-pointer"
-                          title="Baixar 1 unidade"
+                          disabled={isBusy || item.quantity <= 0}
+                          onClick={() => handleTriggerConsume(item, 1, 'Baixa rápida na lista')}
+                          className="btn-compact w-7 h-7 rounded-full bg-white/85 hover:bg-rose-600 disabled:opacity-40 text-slate-700 hover:text-white flex items-center justify-center transition cursor-pointer"
+                          title="Dar baixa de 1 unidade"
+                          aria-label="Dar baixa de 1 unidade"
                         >
-                          <Minus className="w-3 h-3" />
+                          <Minus className="w-3.5 h-3.5" />
                         </button>
                         <div className="px-2 text-center min-w-[68px]">
                           <span
@@ -324,11 +419,13 @@ export const StockSection: React.FC<StockSectionProps> = ({
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleQuickAdjustQuantity(item, 1)}
-                          className="w-6 h-6 rounded-full bg-white/80 hover:bg-indigo-600 text-slate-700 hover:text-white flex items-center justify-center transition cursor-pointer"
+                          disabled={isBusy}
+                          onClick={() => handleTriggerReplenish(item, 1)}
+                          className="btn-compact w-7 h-7 rounded-full bg-white/85 hover:bg-emerald-600 disabled:opacity-40 text-slate-700 hover:text-white flex items-center justify-center transition cursor-pointer"
                           title="Adicionar 1 unidade"
+                          aria-label="Adicionar 1 unidade"
                         >
-                          <Plus className="w-3 h-3" />
+                          <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
@@ -344,8 +441,9 @@ export const StockSection: React.FC<StockSectionProps> = ({
                       <button
                         type="button"
                         onClick={() => handleStartEdit(item)}
-                        className="p-2 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 transition cursor-pointer"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-indigo-500/20 text-slate-600 hover:text-indigo-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Editar item"
+                        aria-label="Editar item"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
@@ -356,8 +454,9 @@ export const StockSection: React.FC<StockSectionProps> = ({
                           if (editingId === item.id) resetForm(category);
                           onDeleteItem(item.id);
                         }}
-                        className="p-2 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 transition cursor-pointer"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Excluir item"
+                        aria-label="Excluir item"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -381,31 +480,291 @@ export const StockSection: React.FC<StockSectionProps> = ({
             Estoque de Madeiras e Lâminas
           </h2>
           <p className="text-xs font-medium text-slate-700">
-            Controle de insumos da oficina com alertas de estoque mínimo, fornecedores e custo unitário.
+            {isOperator
+              ? 'Registre rapidamente o consumo de insumos na produção e acompanhe o histórico recente.'
+              : 'Controle de insumos com baixa rápida de consumo, histórico auditável e alertas de estoque mínimo.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="liquid-glass-pill px-3.5 py-2 rounded-full text-xs font-bold text-slate-800">
-            Itens: <strong className="text-indigo-700">{items.length}</strong>
-          </span>
-          <span className="liquid-glass-pill px-3.5 py-2 rounded-full text-xs font-bold text-slate-800">
-            Valor em Estoque:{' '}
-            <strong className="text-emerald-700 font-mono">
-              {formatBRL(totalStockValue)}
-            </strong>
-          </span>
-          {(lowMadeirasCount + lowLaminasCount > 0) && (
-            <span className="px-3.5 py-2 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-900 border border-amber-400/70 inline-flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
-              {lowMadeirasCount + lowLaminasCount} em alerta
+        {!isOperator && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="liquid-glass-pill px-3.5 py-2 rounded-full text-xs font-bold text-slate-800">
+              Itens: <strong className="text-indigo-700">{items.length}</strong>
             </span>
-          )}
-        </div>
+            <span className="liquid-glass-pill px-3.5 py-2 rounded-full text-xs font-bold text-slate-800">
+              Valor em Estoque:{' '}
+              <strong className="text-emerald-700 font-mono">
+                {formatBRL(totalStockValue)}
+              </strong>
+            </span>
+            {lowMadeirasCount + lowLaminasCount > 0 && (
+              <span className="px-3.5 py-2 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-900 border border-amber-400/70 inline-flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                {lowMadeirasCount + lowLaminasCount} em alerta
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Category Filter Tabs + Local Search */}
-      <div className="liquid-glass rounded-[24px] p-4 flex flex-wrap items-center justify-between gap-3">
+      {/* DESTAQUE: Subseção de Registro Rápido de Consumo (Baixa de Insumos) */}
+      <section className="liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4 ring-1 ring-indigo-400/40">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/60">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 border border-rose-300/60 flex items-center justify-center text-rose-700 shrink-0">
+              <PackageMinus className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Registro Rápido de Consumo
+              </h3>
+              <p className="text-xs font-medium text-slate-600">
+                Dê baixa direta no saldo com 1 clique. Toda movimentação registra data, hora e colaborador com opção de desfazer.
+              </p>
+            </div>
+          </div>
+
+          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-white/65 border border-white/80 text-slate-700 inline-flex items-center gap-1.5">
+            <History className="w-3.5 h-3.5 text-indigo-600" />
+            {movements.length} movimentação(ões)
+          </span>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="p-6 rounded-2xl border border-dashed border-white/75 bg-white/25 text-center text-xs font-medium text-slate-600">
+            {isOperator
+              ? 'Nenhum insumo cadastrado ainda. Solicite ao administrador o cadastro dos materiais no estoque.'
+              : 'Cadastre seus primeiros insumos abaixo (ex.: Chapa de Madeira, Caixa de Lâmina) para liberar os botões de baixa rápida.'}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Botões de Ação Direta (-1 unidade) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+              {quickActionItems.map((item) => {
+                const isLow = item.quantity <= item.minStock;
+                const isBusy = busyItemId === item.id;
+                const unitLabel =
+                  item.category === 'madeiras' && item.unit.toLowerCase() === 'chapa'
+                    ? 'Chapa'
+                    : item.category === 'laminas' &&
+                        (item.unit.toLowerCase() === 'cx' ||
+                          item.unit.toLowerCase() === 'caixa')
+                      ? 'Caixa'
+                      : item.unit;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={isBusy || item.quantity <= 0}
+                    onClick={() => handleTriggerConsume(item, 1, 'Consumo rápido de produção')}
+                    className={`group p-3.5 rounded-2xl border text-left transition flex items-center justify-between gap-3 cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isLow
+                        ? 'bg-amber-500/15 border-amber-400/70 hover:bg-amber-500/25'
+                        : 'bg-white/55 border-white/80 hover:bg-white/80 hover:border-rose-300/80'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white shadow-xs shrink-0">
+                          - 1 {unitLabel}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            CATEGORY_META[item.category].badgeClass
+                          }`}
+                        >
+                          {CATEGORY_META[item.category].shortLabel}
+                        </span>
+                      </div>
+                      <p className="text-xs font-extrabold text-slate-900 mt-1.5 truncate">
+                        {item.name}
+                      </p>
+                      <p className="text-[11px] font-semibold text-slate-600 mt-0.5 font-mono">
+                        Saldo atual:{' '}
+                        <strong className={isLow ? 'text-amber-900' : 'text-slate-900'}>
+                          {item.quantity} {item.unit}
+                        </strong>
+                      </p>
+                    </div>
+
+                    <span className="btn-compact w-9 h-9 rounded-xl bg-rose-500/15 group-hover:bg-rose-600 text-rose-700 group-hover:text-white border border-rose-300/60 flex items-center justify-center transition shrink-0">
+                      <Minus className="w-4 h-4 stroke-[2.5]" />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Baixa personalizada para qualquer outro insumo cadastrado */}
+            <form
+              onSubmit={handleCustomConsumeSubmit}
+              className="p-3.5 rounded-2xl bg-white/45 border border-white/75 grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end"
+            >
+              <div className="md:col-span-5">
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Outro Insumo Cadastrado
+                </label>
+                <select
+                  value={selectedConsumeId || items[0]?.id || ''}
+                  onChange={(e) => setSelectedConsumeId(e.target.value)}
+                  className={inputClass}
+                >
+                  {items.map((it) => (
+                    <option key={it.id} value={it.id}>
+                      {it.name} (Saldo: {it.quantity} {it.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Quantidade
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={customConsumeQty}
+                  onChange={(e) => setCustomConsumeQty(e.target.value)}
+                  className={`${inputClass} font-mono font-bold`}
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Observação (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={consumeNote}
+                  onChange={(e) => setConsumeNote(e.target.value)}
+                  placeholder="Ex.: OS-042 / Bancada"
+                  className={inputClass}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={Boolean(busyItemId)}
+                  className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl text-xs font-bold bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 disabled:opacity-50 text-white shadow-md inline-flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <PackageMinus className="w-4 h-4 shrink-0" />
+                  <span>Dar Baixa</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Histórico de Movimentações */}
+            <div className="space-y-2.5 pt-1">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Histórico Recente de Consumo e Movimentações</span>
+                </h4>
+                {movements.length > 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullHistory((p) => !p)}
+                    className="btn-compact text-xs font-bold text-indigo-700 hover:underline cursor-pointer"
+                  >
+                    {showFullHistory
+                      ? 'Mostrar menos'
+                      : `Ver todas (${movements.length})`}
+                  </button>
+                )}
+              </div>
+
+              {visibleMovements.length === 0 ? (
+                <div className="p-4 rounded-2xl border border-dashed border-white/75 text-center text-xs font-medium text-slate-600">
+                  Nenhuma movimentação registrada ainda. Clique em um botão acima para dar baixa.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {visibleMovements.map((mov) => {
+                    const isConsumo = mov.type === 'consumo';
+                    const isEstorno = mov.type === 'estorno';
+                    const isReverted = Boolean(mov.revertedAt);
+
+                    return (
+                      <div
+                        key={mov.id}
+                        className={`p-3 rounded-2xl bg-white/55 border border-white/80 flex items-center justify-between gap-2.5 text-xs ${
+                          isReverted ? 'opacity-65' : ''
+                        }`}
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                                isEstorno
+                                  ? 'bg-slate-500/15 text-slate-700 border-slate-300/70'
+                                  : isConsumo
+                                    ? 'bg-rose-500/15 text-rose-800 border-rose-300/60'
+                                    : 'bg-emerald-500/15 text-emerald-800 border-emerald-300/60'
+                              }`}
+                            >
+                              {isEstorno
+                                ? 'Estorno'
+                                : isConsumo
+                                  ? `- ${mov.quantity} ${mov.unit}`
+                                  : `+ ${mov.quantity} ${mov.unit}`}
+                            </span>
+                            <span className="font-extrabold text-slate-900 truncate">
+                              {mov.itemName}
+                            </span>
+                            {isReverted && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-200 text-slate-600">
+                                Desfeito
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-medium text-slate-600">
+                            <span className="inline-flex items-center gap-1">
+                              <User className="w-3 h-3 text-indigo-600" />
+                              {mov.actorName}
+                            </span>
+                            <span className="inline-flex items-center gap-1 font-mono">
+                              <Clock className="w-3 h-3 text-slate-500" />
+                              {formatDateTimeGoiasBR(mov.createdAt)}
+                            </span>
+                            <span className="font-mono">
+                              Saldo: {mov.previousBalance} → <strong>{mov.newBalance}</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        {!isEstorno && !isReverted && (
+                          <button
+                            type="button"
+                            disabled={busyMoveId === mov.id}
+                            onClick={() => handleUndo(mov)}
+                            className="btn-compact px-2.5 py-1.5 rounded-full text-[11px] font-bold bg-white/80 hover:bg-indigo-600 text-slate-700 hover:text-white border border-white/90 inline-flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
+                            title="Desfazer esta movimentação"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Desfazer</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Área Administrativa de Controle de Estoque (oculta para Operador) */}
+      {!isOperator && (
+        <>
+          {/* Category Filter Tabs + Local Search */}
+          <div className="liquid-glass rounded-[24px] p-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -450,9 +809,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
             }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>
-              Em falta ({lowMadeirasCount + lowLaminasCount})
-            </span>
+            <span>Em falta ({lowMadeirasCount + lowLaminasCount})</span>
           </button>
         </div>
 
@@ -469,7 +826,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
             <button
               type="button"
               onClick={() => setLocalSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 hover:text-slate-900 cursor-pointer"
+              className="btn-compact absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 hover:text-slate-900 cursor-pointer"
             >
               ✕
             </button>
@@ -504,8 +861,9 @@ export const StockSection: React.FC<StockSectionProps> = ({
               <button
                 type="button"
                 onClick={() => resetForm(category)}
-                className="p-2 rounded-full liquid-glass-pill text-slate-600 hover:text-slate-900 cursor-pointer"
+                className="btn-compact w-8 h-8 rounded-full liquid-glass-pill text-slate-600 hover:text-slate-900 flex items-center justify-center cursor-pointer"
                 title="Cancelar edição"
+                aria-label="Cancelar edição"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -550,8 +908,8 @@ export const StockSection: React.FC<StockSectionProps> = ({
               onChange={(e) => setName(e.target.value)}
               placeholder={
                 category === 'madeiras'
-                  ? 'Ex: Compensado Naval 18mm (1,20x2,40m)'
-                  : 'Ex: Lâmina Corte 2pt 23.8mm Bohler'
+                  ? 'Ex: Chapa de Madeira Naval 18mm'
+                  : 'Ex: Caixa de Lâmina Corte 2pt 23.8mm'
               }
               className={inputClass}
             />
@@ -584,7 +942,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                 required
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                placeholder="chapa / m"
+                placeholder="chapa / cx"
                 className={inputClass}
               />
             </div>
@@ -612,7 +970,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                 type="button"
                 key={preset}
                 onClick={() => setUnit(preset)}
-                className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                className={`btn-compact px-2.5 py-1 rounded-full text-[10px] font-bold transition cursor-pointer ${
                   unit === preset
                     ? 'bg-indigo-600 text-white'
                     : 'liquid-glass-pill text-slate-700'
@@ -690,6 +1048,8 @@ export const StockSection: React.FC<StockSectionProps> = ({
             renderCategoryBlock('laminas', laminasItems)}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

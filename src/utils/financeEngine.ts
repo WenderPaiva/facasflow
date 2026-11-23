@@ -144,6 +144,8 @@ export const EXPENSE_CATEGORIES: {
   { key: 'madeira', label: 'Madeira', colorHex: '#d97706', badgeClass: 'bg-amber-500/15 text-amber-900 border-amber-300/60' },
   { key: 'seguros', label: 'Seguros', colorHex: '#2563eb', badgeClass: 'bg-blue-500/15 text-blue-800 border-blue-300/60' },
   { key: 'impostos', label: 'Impostos', colorHex: '#dc2626', badgeClass: 'bg-rose-500/15 text-rose-800 border-rose-300/60' },
+  { key: 'flow_dashboard', label: 'Flow Dashboard', colorHex: '#4338ca', badgeClass: 'bg-indigo-500/15 text-indigo-900 border-indigo-400/60' },
+  { key: 'taxas_bancarias', label: 'Taxas Bancárias', colorHex: '#0f766e', badgeClass: 'bg-teal-500/15 text-teal-900 border-teal-400/60' },
   { key: 'outros', label: 'Outros', colorHex: '#71717a', badgeClass: 'bg-zinc-500/15 text-zinc-800 border-zinc-300/60' },
 ];
 
@@ -189,12 +191,29 @@ export const EXPENSE_STATUS_META: Record<
   },
 };
 
-export const INVESTMENT_TYPE_META: Record<InvestmentType, { label: string }> = {
-  renda_fixa: { label: 'Renda Fixa' },
-  acoes: { label: 'Ações' },
-  fii: { label: 'Fundos Imobiliários' },
-  outro: { label: 'Outro' },
+export const INVESTMENT_TYPE_META: Record<
+  InvestmentType,
+  { label: string; badgeClass: string }
+> = {
+  aplicacao: {
+    label: 'Aplicação',
+    badgeClass: 'bg-indigo-500/15 text-indigo-800 border-indigo-300/60',
+  },
+  consorcio: {
+    label: 'Consórcio',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-300/60',
+  },
+  outros: {
+    label: 'Outros',
+    badgeClass: 'bg-slate-500/15 text-slate-800 border-slate-300/60',
+  },
 };
+
+export function normalizeInvestmentType(raw?: string): InvestmentType {
+  if (raw === 'consorcio') return 'consorcio';
+  if (raw === 'outros' || raw === 'outro') return 'outros';
+  return 'aplicacao';
+}
 
 export function createEmptyExpensesMap(): Record<ExpenseCategoryKey, number> {
   return {
@@ -212,6 +231,8 @@ export function createEmptyExpensesMap(): Record<ExpenseCategoryKey, number> {
     madeira: 0,
     seguros: 0,
     impostos: 0,
+    flow_dashboard: 0,
+    taxas_bancarias: 0,
     outros: 0,
   };
 }
@@ -636,11 +657,18 @@ export function normalizeOrderPaymentStatus(order: DieOrder): DieOrder {
       ? 'nao_pago'
       : order.paymentStatus;
 
-  if (migratedModality === 'nao_pago') {
-    return { ...order, paymentModality: migratedModality, paymentStatus: 'nao_pago' };
-  }
-  if (migratedStatus === 'pago' || migratedStatus === 'sem_nota') {
-    return { ...order, paymentModality: migratedModality, paymentStatus: migratedStatus };
+  // Regra 5.1: pedidos pagos permanecem pagos; pedidos marcados como nao_pago permanecem nao_pago
+  // independentemente da forma de pagamento escolhida até o usuário clicar em "Marcar como pago".
+  if (
+    migratedStatus === 'pago' ||
+    migratedStatus === 'nao_pago' ||
+    migratedStatus === 'sem_nota'
+  ) {
+    return {
+      ...order,
+      paymentModality: migratedModality,
+      paymentStatus: migratedStatus,
+    };
   }
   const diff = getDaysDiff(order.dueDate);
   const nextStatus: PaymentStatus = diff < 0 ? 'vencido' : 'a_receber';
@@ -654,6 +682,8 @@ export function normalizeOrderPaymentStatus(order: DieOrder): DieOrder {
 export interface FinancialBreakdown {
   receivable30d: number;
   receivableCount: number;
+  unpaidTotal: number;
+  unpaidCount: number;
   overdueTotal: number;
   overdueCount: number;
   unbilledTotal: number;
@@ -674,6 +704,8 @@ export interface FinancialBreakdown {
 export function computeFinancialBreakdown(orders: DieOrder[]): FinancialBreakdown {
   let receivable30d = 0;
   let receivableCount = 0;
+  let unpaidTotal = 0;
+  let unpaidCount = 0;
   let overdueTotal = 0;
   let overdueCount = 0;
   let unbilledTotal = 0;
@@ -704,6 +736,12 @@ export function computeFinancialBreakdown(orders: DieOrder[]): FinancialBreakdow
       case 'pago':
         paidTotal += val;
         paidCount += 1;
+        break;
+      case 'nao_pago':
+        unpaidTotal += val;
+        unpaidCount += 1;
+        receivable30d += val;
+        receivableCount += 1;
         break;
       case 'vencido':
         overdueTotal += val;
@@ -737,6 +775,8 @@ export function computeFinancialBreakdown(orders: DieOrder[]): FinancialBreakdow
   return {
     receivable30d,
     receivableCount,
+    unpaidTotal,
+    unpaidCount,
     overdueTotal,
     overdueCount,
     unbilledTotal,

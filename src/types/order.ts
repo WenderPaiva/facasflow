@@ -82,6 +82,26 @@ export interface NoteRecord {
 
 export type StockCategory = 'madeiras' | 'laminas';
 
+export type StockMovementType = 'consumo' | 'reposicao' | 'estorno';
+
+export interface StockMovementRecord {
+  id: string;
+  empresa_id?: string;
+  stockItemUuid: string;
+  itemCode: string;
+  itemName: string;
+  category: StockCategory;
+  unit: string;
+  type: StockMovementType;
+  quantity: number;
+  previousBalance: number;
+  newBalance: number;
+  actorName: string;
+  note?: string;
+  revertedAt?: string | null;
+  createdAt: string;
+}
+
 export interface StockItem {
   id: string; // e.g., "EST-001"
   dbUuid?: string;
@@ -117,6 +137,7 @@ export interface AuthSession {
   ownerName: string;
   email: string;
   role: UserRole;
+  isSuperAdmin?: boolean;
   jobTitle?: string;
   loggedInAt: string;
 }
@@ -204,6 +225,8 @@ export type ExpenseCategoryKey =
   | 'madeira'
   | 'seguros'
   | 'impostos'
+  | 'flow_dashboard'
+  | 'taxas_bancarias'
   | 'outros';
 
 export type ExpenseStatus = 'pendente' | 'pago' | 'cancelado';
@@ -304,13 +327,14 @@ export interface PayrollEmployeeRecord {
   updatedAt: string;
 }
 
-export type InvestmentType = 'renda_fixa' | 'acoes' | 'fii' | 'outro';
+export type InvestmentType = 'aplicacao' | 'consorcio' | 'outros';
 
 export interface InvestmentRecord {
   id: string; // e.g., "INV-001"
   dbUuid?: string;
   company_id?: string;
   assetName: string;
+  description?: string;
   assetType: InvestmentType;
   appliedDate: string; // YYYY-MM-DD
   investedAmount: number;
@@ -326,6 +350,7 @@ export interface EnterpriseDatabase {
   deliveries: DeliveryRecord[];
   returns: WarrantyReturnRecord[];
   stock?: StockItem[];
+  stockMovements?: StockMovementRecord[];
   notas?: NoteRecord[];
   noteSequence?: number;
   despesas?: ExpenseRecord[];
