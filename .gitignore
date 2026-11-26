@@ -1,0 +1,29 @@
+node_modules/
+build/
+.vite/
+
+# Backups & Local Company Data
+data/facasflow-db-*.json
+data/*backup*.json
+backups/
+*.json.gz
+
+# Secrets & Credentials
+.env
+.env.*
+*.pem
+*.key
+*.secret
+*credentials*.json
+*service-account*.json
+*supabase*key*
+
+# Logs, Temp & Test Artifacts
+*.log
+tmp/
+.tmp/
+playwright-report/
+test-results/
+screenshots/
+*.png
+*.jpg
