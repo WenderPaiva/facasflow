@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Check, Layers, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, Layers, Loader2, X } from 'lucide-react';
 import {
   Company,
   PaymentModality,
@@ -20,7 +20,7 @@ interface FastEntryModalProps {
     amount: number;
     paymentModality: PaymentModality;
     stage: ProductionStage;
-  }) => void;
+  }) => Promise<boolean> | boolean;
 }
 
 export const FastEntryModal: React.FC<FastEntryModalProps> = ({
@@ -36,23 +36,27 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
   const [amount, setAmount] = useState('');
   const [paymentModality, setPaymentModality] = useState<PaymentModality>('boleto');
   const [stage, setStage] = useState<ProductionStage>('arquivo_recebido');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
       setSelectedCompanyId(companies[0]?.id || 'nova');
       setCustomCompanyName('');
       setToolDescription('');
       setAmount('');
       setPaymentModality('boleto');
       setStage('arquivo_recebido');
+      setIsSubmitting(false);
     }
+    wasOpenRef.current = isOpen;
   }, [isOpen, companies]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!toolDescription.trim()) return;
+    if (isSubmitting || !toolDescription.trim()) return;
 
     const existingComp = companies.find((c) => c.id === selectedCompanyId);
     const companyName =
@@ -62,17 +66,23 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
     const companyPhone = existingComp?.phone || '(11) 99999-0000';
     const numericAmount = parseFloat(amount.replace(',', '.')) || 0;
 
-    onSaveOrder({
-      companyId: existingComp?.id || `EMP-${Date.now().toString().slice(-3)}`,
-      companyName,
-      companyPhone,
-      toolDescription: toolDescription.trim(),
-      amount: numericAmount,
-      paymentModality,
-      stage,
-    });
-
-    onClose();
+    setIsSubmitting(true);
+    try {
+      const ok = await onSaveOrder({
+        companyId: existingComp?.id || '__new__',
+        companyName,
+        companyPhone,
+        toolDescription: toolDescription.trim(),
+        amount: numericAmount,
+        paymentModality,
+        stage,
+      });
+      if (ok !== false) {
+        onClose();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const inputClass =
@@ -238,10 +248,20 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
           <div className="px-5 py-4 border-t border-white/60 bg-white/45 shrink-0 pb-[calc(1rem+env(safe-area-inset-bottom))]">
             <button
               type="submit"
-              className="w-full min-h-[48px] py-3 rounded-full text-sm font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+              disabled={isSubmitting}
+              className="w-full min-h-[48px] py-3 rounded-full text-sm font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
             >
-              <Check className="w-4 h-4 stroke-[2.5]" />
-              <span>Registrar {nextOrderId} na Esteira</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Registrando na Esteira...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  <span>Registrar {nextOrderId} na Esteira</span>
+                </>
+              )}
             </button>
           </div>
         </form>

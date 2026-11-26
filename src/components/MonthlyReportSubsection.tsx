@@ -87,20 +87,63 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
     return Array.from(years).sort((a, b) => b - a);
   }, [orders, despesas, initialYear]);
 
+  const groupedByMonth = useMemo(() => {
+    const paidOrdersMap = new Map<string, DieOrder[]>();
+    const unpaidOrdersMap = new Map<string, DieOrder[]>();
+    const expensesMap = new Map<string, ExpenseRecord[]>();
+    const providersMap = new Map<string, ServiceProviderRecord[]>();
+    const investmentsMap = new Map<string, InvestmentRecord[]>();
+
+    for (const o of orders) {
+      if (o.paymentStatus === 'pago') {
+        const key = (o.paidAt || o.createdAt || '').slice(0, 7);
+        const arr = paidOrdersMap.get(key);
+        if (arr) arr.push(o);
+        else paidOrdersMap.set(key, [o]);
+      } else {
+        const key = (o.createdAt || '').slice(0, 7);
+        const arr = unpaidOrdersMap.get(key);
+        if (arr) arr.push(o);
+        else unpaidOrdersMap.set(key, [o]);
+      }
+    }
+
+    for (const d of despesas) {
+      if (d.deleted_at || d.status === 'cancelado') continue;
+      const key = (d.data_competencia || '').slice(0, 7);
+      const arr = expensesMap.get(key);
+      if (arr) arr.push(d);
+      else expensesMap.set(key, [d]);
+    }
+
+    for (const p of serviceProviders) {
+      const key = (p.dueDate || '').slice(0, 7);
+      const arr = providersMap.get(key);
+      if (arr) arr.push(p);
+      else providersMap.set(key, [p]);
+    }
+
+    for (const inv of investments) {
+      const key = (inv.appliedDate || '').slice(0, 7);
+      const arr = investmentsMap.get(key);
+      if (arr) arr.push(inv);
+      else investmentsMap.set(key, [inv]);
+    }
+
+    return {
+      paidOrdersMap,
+      unpaidOrdersMap,
+      expensesMap,
+      providersMap,
+      investmentsMap,
+    };
+  }, [orders, despesas, serviceProviders, investments]);
+
   const computeMonthTotals = (monthKey: string) => {
     const monthEnd = `${monthKey}-31`;
 
-    // Entradas efetivamente pagas no mês
-    const paidOrders = orders.filter((o) => {
-      if (o.paymentStatus !== 'pago') return false;
-      const refDate = (o.paidAt || o.createdAt || '').slice(0, 7);
-      return refDate === monthKey;
-    });
-    const unpaidOrdersInMonth = orders.filter((o) => {
-      if (o.paymentStatus === 'pago') return false;
-      const refDate = (o.createdAt || '').slice(0, 7);
-      return refDate === monthKey;
-    });
+    const paidOrders = groupedByMonth.paidOrdersMap.get(monthKey) || [];
+    const unpaidOrdersInMonth = groupedByMonth.unpaidOrdersMap.get(monthKey) || [];
 
     const totalEntradas = roundCurrencyBRL(
       paidOrders.reduce((sum, o) => sum + (Number(o.amount) || 0), 0)
@@ -109,21 +152,12 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
       unpaidOrdersInMonth.reduce((sum, o) => sum + (Number(o.amount) || 0), 0)
     );
 
-    // Saídas: Despesas ativas (não canceladas) do mês
-    const monthExpenses = despesas.filter(
-      (d) =>
-        !d.deleted_at &&
-        d.status !== 'cancelado' &&
-        (d.data_competencia || '').slice(0, 7) === monthKey
-    );
+    const monthExpenses = groupedByMonth.expensesMap.get(monthKey) || [];
     const totalDespesas = roundCurrencyBRL(
       monthExpenses.reduce((sum, d) => sum + (Number(d.valor) || 0), 0)
     );
 
-    // Saídas: Prestadores de Serviço com vencimento no mês
-    const monthProviders = serviceProviders.filter(
-      (p) => (p.dueDate || '').slice(0, 7) === monthKey
-    );
+    const monthProviders = groupedByMonth.providersMap.get(monthKey) || [];
     const totalPrestadores = roundCurrencyBRL(
       monthProviders.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
     );
@@ -137,9 +171,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
     );
 
     // Investimentos lançados no mês (informativo + detalhamento)
-    const monthInvestments = investments.filter(
-      (inv) => (inv.appliedDate || '').slice(0, 7) === monthKey
-    );
+    const monthInvestments = groupedByMonth.investmentsMap.get(monthKey) || [];
     const totalInvestimentos = roundCurrencyBRL(
       monthInvestments.reduce((sum, inv) => sum + (Number(inv.investedAmount) || 0), 0)
     );
@@ -169,15 +201,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
 
   const report = useMemo(
     () => computeMonthTotals(selectedMonthKey),
-    [
-      selectedMonthKey,
-      selectedMonthEnd,
-      orders,
-      despesas,
-      serviceProviders,
-      payrollEmployees,
-      investments,
-    ]
+    [selectedMonthKey, groupedByMonth, payrollEmployees]
   );
 
   // Últimos 6 meses comparativos
@@ -204,15 +228,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
       });
     }
     return list;
-  }, [
-    selectedYear,
-    selectedMonth,
-    orders,
-    despesas,
-    serviceProviders,
-    payrollEmployees,
-    investments,
-  ]);
+  }, [selectedYear, selectedMonth, groupedByMonth, payrollEmployees]);
 
   const maxBarValue = useMemo(() => {
     const m = last6Months.reduce(

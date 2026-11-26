@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Briefcase, Check, Edit3, Trash2, Users, X } from 'lucide-react';
+import { Briefcase, Check, Edit3, Loader2, Trash2, Users, X } from 'lucide-react';
 import {
   PaymentModality,
   PayrollEmployeeRecord,
@@ -20,20 +20,20 @@ interface CollaboratorsSubsectionProps {
   payrollEmployees: PayrollEmployeeRecord[];
   onAddProvider: (
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdateProvider: (
     id: string,
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeleteProvider: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeleteProvider: (id: string) => Promise<void> | void;
   onAddPayrollEmployee: (
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdatePayrollEmployee: (
     id: string,
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeletePayrollEmployee: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeletePayrollEmployee: (id: string) => Promise<void> | void;
 }
 
 const PROVIDER_STATUS_META: Record<
@@ -76,6 +76,7 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
   const [provModality, setProvModality] = useState<PaymentModality>('pix');
   const [provDueDate, setProvDueDate] = useState(() => toISODate());
   const [provStatus, setProvStatus] = useState<ServiceProviderStatus>('pendente');
+  const [isSubmittingProv, setIsSubmittingProv] = useState(false);
 
   // Payroll Employees Form State
   const [editEmpId, setEditEmpId] = useState<string | null>(null);
@@ -83,6 +84,8 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
   const [empRoleTitle, setEmpRoleTitle] = useState('');
   const [empSalary, setEmpSalary] = useState(0);
   const [empAdmissionDate, setEmpAdmissionDate] = useState(() => toISODate());
+  const [isSubmittingEmp, setIsSubmittingEmp] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   const totalProviders = providers.reduce((sum, p) => sum + (p.amount || 0), 0);
   const totalPayroll = payrollEmployees.reduce(
@@ -108,9 +111,9 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
     setEmpAdmissionDate(toISODate());
   };
 
-  const handleProviderSubmit = (e: React.FormEvent) => {
+  const handleProviderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!provName.trim() || !provService.trim()) return;
+    if (isSubmittingProv || !provName.trim() || !provService.trim()) return;
     const payload = {
       name: provName.trim(),
       service: provService.trim(),
@@ -119,29 +122,61 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
       dueDate: provDueDate || toISODate(),
       status: provStatus,
     };
-    if (editProvId) {
-      onUpdateProvider(editProvId, payload);
-    } else {
-      onAddProvider(payload);
+    setIsSubmittingProv(true);
+    try {
+      const ok = editProvId
+        ? await onUpdateProvider(editProvId, payload)
+        : await onAddProvider(payload);
+      if (ok !== false) {
+        resetProviderForm();
+      }
+    } finally {
+      setIsSubmittingProv(false);
     }
-    resetProviderForm();
   };
 
-  const handleEmployeeSubmit = (e: React.FormEvent) => {
+  const handleEmployeeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!empName.trim() || !empRoleTitle.trim()) return;
+    if (isSubmittingEmp || !empName.trim() || !empRoleTitle.trim()) return;
     const payload = {
       name: empName.trim(),
       roleTitle: empRoleTitle.trim(),
       salary: empSalary,
       admissionDate: empAdmissionDate || toISODate(),
     };
-    if (editEmpId) {
-      onUpdatePayrollEmployee(editEmpId, payload);
-    } else {
-      onAddPayrollEmployee(payload);
+    setIsSubmittingEmp(true);
+    try {
+      const ok = editEmpId
+        ? await onUpdatePayrollEmployee(editEmpId, payload)
+        : await onAddPayrollEmployee(payload);
+      if (ok !== false) {
+        resetEmployeeForm();
+      }
+    } finally {
+      setIsSubmittingEmp(false);
     }
-    resetEmployeeForm();
+  };
+
+  const handleDeleteProv = async (id: string) => {
+    if (deletingKey) return;
+    setDeletingKey(`prov:${id}`);
+    try {
+      await onDeleteProvider(id);
+      if (editProvId === id) resetProviderForm();
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const handleDeleteEmp = async (id: string) => {
+    if (deletingKey) return;
+    setDeletingKey(`emp:${id}`);
+    try {
+      await onDeletePayrollEmployee(id);
+      if (editEmpId === id) resetEmployeeForm();
+    } finally {
+      setDeletingKey(null);
+    }
   };
 
   const inputClass =
@@ -331,10 +366,20 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
 
             <button
               type="submit"
-              className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmittingProv}
+              className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Check className="w-4 h-4" />
-              <span>{editProvId ? 'Salvar Prestador' : 'Adicionar Prestador'}</span>
+              {isSubmittingProv ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{editProvId ? 'Salvando...' : 'Adicionando...'}</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>{editProvId ? 'Salvar Prestador' : 'Adicionar Prestador'}</span>
+                </>
+              )}
             </button>
           </form>
 
@@ -400,15 +445,17 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (editProvId === p.id) resetProviderForm();
-                          onDeleteProvider(p.id);
-                        }}
-                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        disabled={Boolean(deletingKey)}
+                        onClick={() => void handleDeleteProv(p.id)}
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Excluir prestador"
                         aria-label="Excluir prestador"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {deletingKey === `prov:${p.id}` ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -507,12 +554,22 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
 
             <button
               type="submit"
-              className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmittingEmp}
+              className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Check className="w-4 h-4" />
-              <span>
-                {editEmpId ? 'Salvar Funcionário' : 'Adicionar Funcionário'}
-              </span>
+              {isSubmittingEmp ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{editEmpId ? 'Salvando...' : 'Adicionando...'}</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>
+                    {editEmpId ? 'Salvar Funcionário' : 'Adicionar Funcionário'}
+                  </span>
+                </>
+              )}
             </button>
           </form>
 
@@ -561,15 +618,17 @@ export const CollaboratorsSubsection: React.FC<CollaboratorsSubsectionProps> = (
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (editEmpId === emp.id) resetEmployeeForm();
-                        onDeletePayrollEmployee(emp.id);
-                      }}
-                      className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                      disabled={Boolean(deletingKey)}
+                      onClick={() => void handleDeleteEmp(emp.id)}
+                      className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                       title="Excluir funcionário"
                       aria-label="Excluir funcionário"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      {deletingKey === `emp:${emp.id}` ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   </div>
                 </div>

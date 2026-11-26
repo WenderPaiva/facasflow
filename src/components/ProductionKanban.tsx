@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,7 +11,7 @@ import {
   Trash2,
   Truck,
 } from 'lucide-react';
-import { DieOrder, ProductionStage } from '../types/order';
+import { DieOrder, ProductionStage, UserRole } from '../types/order';
 import {
   formatBRL,
   formatDateBR,
@@ -23,6 +23,7 @@ import {
 
 interface ProductionKanbanProps {
   orders: DieOrder[];
+  userRole?: UserRole;
   pendingOrderIds?: string[];
   moveError?: string | null;
   onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
@@ -32,6 +33,7 @@ interface ProductionKanbanProps {
 
 interface OrderKanbanCardProps {
   order: DieOrder;
+  userRole?: UserRole;
   isPending: boolean;
   isExpanded: boolean;
   onToggleExpand: (id: string) => void;
@@ -49,6 +51,7 @@ const ACTIVE_PRODUCTION_STAGES = PRODUCTION_STAGES.filter(
 const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
   ({
     order,
+    userRole,
     isPending,
     isExpanded,
     onToggleExpand,
@@ -62,6 +65,7 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
     const nextStage = getNextStage(order.stage);
     const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
     const isFinalizingStep = nextStage === 'faca_pronta';
+    const canDeleteOrder = userRole !== 'operador' && userRole !== 'cliente';
 
     return (
       <div
@@ -100,15 +104,18 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
                 <ChevronDown className="w-3 h-3" />
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => onDeleteOrder(order.id)}
-              className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-              title="Excluir esta OS"
-              aria-label="Excluir esta OS"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
+            {canDeleteOrder && (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => onDeleteOrder(order.id)}
+                className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                title="Excluir esta OS"
+                aria-label="Excluir esta OS"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -210,6 +217,7 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
 
 export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
   orders,
+  userRole,
   pendingOrderIds = [],
   moveError,
   onMoveStage,
@@ -223,7 +231,8 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
     () => new Set()
   );
 
-  const pendingSet = new Set(pendingOrderIds);
+  const pendingSet = useMemo(() => new Set(pendingOrderIds), [pendingOrderIds]);
+  const canDeleteOrder = userRole !== 'operador' && userRole !== 'cliente';
 
   const activeOrders = useMemo(
     () => orders.filter((o) => o.stage !== 'faca_pronta'),
@@ -238,14 +247,19 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
     [readyOrders]
   );
 
-  const handleToggleExpand = (orderId: string) => {
+  const handleToggleExpand = useCallback((orderId: string) => {
     setExpandedOrderIds((prev) => {
       const next = new Set(prev);
       if (next.has(orderId)) next.delete(orderId);
       else next.add(orderId);
       return next;
     });
-  };
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedId(null);
+    setDragOverStage(null);
+  }, []);
 
   return (
     <div className="space-y-5 min-w-0">
@@ -405,14 +419,12 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                       <OrderKanbanCard
                         key={order.id}
                         order={order}
+                        userRole={userRole}
                         isPending={pendingSet.has(order.id)}
                         isExpanded={expandedOrderIds.has(order.id)}
                         onToggleExpand={handleToggleExpand}
                         onDragStart={setDraggedId}
-                        onDragEnd={() => {
-                          setDraggedId(null);
-                          setDragOverStage(null);
-                        }}
+                        onDragEnd={handleDragEnd}
                         onMoveStage={onMoveStage}
                         onQuickRegisterDelivery={onQuickRegisterDelivery}
                         onDeleteOrder={onDeleteOrder}
@@ -509,15 +521,18 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                               <ChevronDown className="w-3.5 h-3.5" />
                             )}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteOrder(order.id)}
-                            className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
-                            title="Excluir esta OS"
-                            aria-label="Excluir esta OS"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canDeleteOrder && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => onDeleteOrder(order.id)}
+                              className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
+                              title="Excluir esta OS"
+                              aria-label="Excluir esta OS"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
 

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Building2,
   Check,
   Layers,
+  Loader2,
   Phone,
   Plus,
   Trash2,
@@ -22,15 +23,15 @@ interface CompaniesCrmSectionProps {
   orders: DieOrder[];
   selectedCompanyId: string | null;
   onSelectCompany: (id: string) => void;
-  onAddCompany: (company: Omit<Company, 'id'>) => void;
-  onDeleteCompany: (companyId: string) => void;
-  onDeleteOrder: (orderId: string) => void;
+  onAddCompany: (company: Omit<Company, 'id'>) => Promise<boolean> | boolean;
+  onDeleteCompany: (companyId: string) => Promise<void> | void;
+  onDeleteOrder: (orderId: string) => Promise<void> | void;
   onAddDieForCompany: (
     company: Company,
     toolDescription: string,
     amount: number,
     modality: PaymentModality
-  ) => void;
+  ) => Promise<boolean> | boolean;
 }
 
 export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
@@ -57,36 +58,89 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
   const [toolDesc, setToolDesc] = useState('');
   const [toolAmount, setToolAmount] = useState('');
   const [toolModality, setToolModality] = useState<PaymentModality>('boleto');
+  const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+  const [isCreatingDie, setIsCreatingDie] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
-  const handleCreateCompany = (e: React.FormEvent) => {
+  const ordersByCompanyId = useMemo(() => {
+    const map = new Map<string, DieOrder[]>();
+    for (const o of orders) {
+      const list = map.get(o.companyId);
+      if (list) list.push(o);
+      else map.set(o.companyId, [o]);
+    }
+    return map;
+  }, [orders]);
+
+  const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCorpName.trim()) return;
-    onAddCompany({
-      corporateName: newCorpName.trim(),
-      cnpj: newCnpj.trim() || '00.000.000/0001-00',
-      phone: newPhone.trim() || '(11) 99999-0000',
-      contactName: newContact.trim() || 'Compras / PCP',
-    });
-    setNewCorpName('');
-    setNewCnpj('');
-    setNewPhone('');
-    setNewContact('');
-    setShowNewCompanyForm(false);
+    if (isCreatingCompany || !newCorpName.trim()) return;
+    setIsCreatingCompany(true);
+    try {
+      const ok = await onAddCompany({
+        corporateName: newCorpName.trim(),
+        cnpj: newCnpj.trim() || '00.000.000/0001-00',
+        phone: newPhone.trim() || '(11) 99999-0000',
+        contactName: newContact.trim() || 'Compras / PCP',
+      });
+      if (ok !== false) {
+        setNewCorpName('');
+        setNewCnpj('');
+        setNewPhone('');
+        setNewContact('');
+        setShowNewCompanyForm(false);
+      }
+    } finally {
+      setIsCreatingCompany(false);
+    }
   };
 
-  const handleCreateDieInCompany = (e: React.FormEvent) => {
+  const handleCreateDieInCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeCompany || !toolDesc.trim()) return;
+    if (isCreatingDie || !activeCompany || !toolDesc.trim()) return;
     const val = parseFloat(toolAmount.replace(',', '.')) || 0;
-    onAddDieForCompany(activeCompany, toolDesc.trim(), val, toolModality);
-    setToolDesc('');
-    setToolAmount('');
+    setIsCreatingDie(true);
+    try {
+      const ok = await onAddDieForCompany(activeCompany, toolDesc.trim(), val, toolModality);
+      if (ok !== false) {
+        setToolDesc('');
+        setToolAmount('');
+      }
+    } finally {
+      setIsCreatingDie(false);
+    }
   };
 
-  const companyOrders = activeCompany
-    ? orders.filter((o) => o.companyId === activeCompany.id)
-    : [];
-  const companyTotalValue = companyOrders.reduce((acc, o) => acc + (o.amount || 0), 0);
+  const handleDeleteComp = async (companyId: string) => {
+    const key = `comp:${companyId}`;
+    if (deletingKey) return;
+    setDeletingKey(key);
+    try {
+      await onDeleteCompany(companyId);
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const handleDeleteOrd = async (orderId: string) => {
+    const key = `ord:${orderId}`;
+    if (deletingKey) return;
+    setDeletingKey(key);
+    try {
+      await onDeleteOrder(orderId);
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const companyOrders = useMemo(
+    () => (activeCompany ? ordersByCompanyId.get(activeCompany.id) || [] : []),
+    [activeCompany, ordersByCompanyId]
+  );
+  const companyTotalValue = useMemo(
+    () => companyOrders.reduce((acc, o) => acc + (o.amount || 0), 0),
+    [companyOrders]
+  );
 
   const inputClass =
     'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
@@ -157,9 +211,17 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
           <div className="flex justify-end">
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-md transition cursor-pointer"
+              disabled={isCreatingCompany}
+              className="px-5 py-2.5 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-md inline-flex items-center gap-1.5 transition cursor-pointer"
             >
-              Salvar Empresa
+              {isCreatingCompany ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <span>Salvar Empresa</span>
+              )}
             </button>
           </div>
         </form>
@@ -181,9 +243,10 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
           {/* LEFT COLUMN: LISTA DE EMPRESAS (5 Cols) */}
           <div className="lg:col-span-5 space-y-3">
             {companies.map((comp) => {
-              const linked = orders.filter((o) => o.companyId === comp.id);
+              const linked = ordersByCompanyId.get(comp.id) || [];
               const sumVal = linked.reduce((acc, o) => acc + (o.amount || 0), 0);
               const isSelected = activeCompany?.id === comp.id;
+              const isDeletingThis = deletingKey === `comp:${comp.id}`;
 
               return (
                 <div
@@ -222,15 +285,20 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                       </span>
                       <button
                         type="button"
+                        disabled={Boolean(deletingKey)}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onDeleteCompany(comp.id);
+                          void handleDeleteComp(comp.id);
                         }}
-                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Excluir empresa e facas vinculadas"
                         aria-label="Excluir empresa"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {isDeletingThis ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -285,12 +353,17 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => onDeleteCompany(activeCompany.id)}
-                    className="btn-compact w-10 h-10 rounded-2xl liquid-glass-pill text-slate-600 hover:text-rose-700 flex items-center justify-center transition cursor-pointer shrink-0"
+                    disabled={Boolean(deletingKey)}
+                    onClick={() => void handleDeleteComp(activeCompany.id)}
+                    className="btn-compact w-10 h-10 rounded-2xl liquid-glass-pill disabled:opacity-50 text-slate-600 hover:text-rose-700 flex items-center justify-center transition cursor-pointer shrink-0"
                     title="Excluir esta empresa"
                     aria-label="Excluir empresa"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {deletingKey === `comp:${activeCompany.id}` ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -355,10 +428,20 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
 
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-md flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                    disabled={isCreatingDie}
+                    className="px-4 py-2 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-md flex items-center gap-1.5 transition cursor-pointer shrink-0"
                   >
-                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Cadastrar Faca</span>
+                    {isCreatingDie ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Cadastrando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Cadastrar Faca</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -377,6 +460,7 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                   companyOrders.map((order) => {
                     const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
                     const stageMeta = PRODUCTION_STAGES.find((s) => s.id === order.stage);
+                    const isDeletingOrder = deletingKey === `ord:${order.id}`;
                     return (
                       <div
                         key={order.id}
@@ -417,12 +501,17 @@ export const CompaniesCrmSection: React.FC<CompaniesCrmSectionProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={() => onDeleteOrder(order.id)}
-                            className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                            disabled={Boolean(deletingKey)}
+                            onClick={() => void handleDeleteOrd(order.id)}
+                            className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                             title="Excluir esta OS / Faca"
                             aria-label="Excluir ordem de serviço"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            {isDeletingOrder ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         </div>
                       </div>

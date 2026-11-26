@@ -17,7 +17,7 @@ import {
 import { AuthSession } from '../types/order';
 
 interface AuthLoginScreenProps {
-  onAuthenticated: (session: AuthSession) => void;
+  onAuthenticated: (session: AuthSession) => Promise<void> | void;
 }
 
 export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
@@ -50,7 +50,7 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
         setErrorMsg(res.error || 'Falha na autenticação.');
         return;
       }
-      onAuthenticated(res.session);
+      await onAuthenticated(res.session);
     } finally {
       setIsSubmitting(false);
     }
@@ -83,7 +83,7 @@ export const AuthLoginScreen: React.FC<AuthLoginScreenProps> = ({
         setErrorMsg(res.error || 'Não foi possível criar a conta.');
         return;
       }
-      onAuthenticated(res.session);
+      await onAuthenticated(res.session);
     } finally {
       setIsSubmitting(false);
     }

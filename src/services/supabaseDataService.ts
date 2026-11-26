@@ -47,6 +47,45 @@ function fromExpensePayment(pm: string): PaymentModality {
   return 'pix';
 }
 
+export function toFriendlySupabaseError(err: unknown, fallback: string): string {
+  const code = String((err as any)?.code || '').trim().toUpperCase();
+  const raw = String((err as any)?.message || err || '').trim();
+  const lower = raw.toLowerCase();
+
+  if (code === 'P0001' && raw && !lower.includes('constraint') && !lower.includes('relation')) {
+    return raw;
+  }
+  if (lower.includes('ordens_servico_empresa_id_numero_os_key') || (code === '23505' && lower.includes('numero_os'))) {
+    return 'Conflito na numeração automática da OS. Tente novamente em instantes.';
+  }
+  if (code === '23505' || lower.includes('duplicate key') || lower.includes('unique constraint')) {
+    return 'Já existe um registro com este identificador ou código.';
+  }
+  if (code === '23503' || lower.includes('foreign key')) {
+    return 'O registro vinculado não foi encontrado ou já foi removido.';
+  }
+  if (code === '23514' || lower.includes('check constraint')) {
+    return 'Um dos valores informados está fora das regras permitidas.';
+  }
+  if (
+    code === '42501' ||
+    lower.includes('row-level security') ||
+    lower.includes('permission denied')
+  ) {
+    return 'Você não tem permissão para executar esta operação.';
+  }
+  if (code === 'PGRST116' || lower.includes('0 rows')) {
+    return 'Registro não encontrado ou sem permissão de acesso.';
+  }
+  if (lower.includes('jwt expired') || lower.includes('not authenticated') || lower.includes('invalid jwt')) {
+    return 'Sua sessão expirou. Entre novamente para continuar.';
+  }
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('fetch failed')) {
+    return 'Falha de conexão com o servidor. Verifique sua internet e tente novamente.';
+  }
+  return fallback;
+}
+
 function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -70,7 +109,10 @@ async function resolveProfileSession(userId: string, email: string): Promise<Aut
 
   if (pErr || !perfil) {
     throw new Error(
-      pErr?.message || 'Perfil de empresa não localizado para este usuário.'
+      toFriendlySupabaseError(
+        pErr,
+        'Perfil de empresa não localizado para este usuário.'
+      )
     );
   }
 
@@ -94,11 +136,11 @@ async function resolveProfileSession(userId: string, email: string): Promise<Aut
     ownerName: perfil.nome || email.split('@')[0],
     email: perfil.email || email,
     role:
-      perfil.role === 'operador'
+      perfil.role === 'admin'
+        ? 'admin'
+        : perfil.role === 'operador'
         ? 'operador'
-        : perfil.role === 'cliente'
-        ? 'cliente'
-        : 'admin',
+        : 'cliente',
     isSuperAdmin,
     jobTitle: perfil.cargo || undefined,
     loggedInAt: new Date().toISOString(),
@@ -148,14 +190,14 @@ export async function signInWithSupabase(
     if (msg.includes('invalid login credentials')) {
       return { error: 'E-mail ou senha inválidos. Verifique suas credenciais.' };
     }
-    return { error: error?.message || 'Não foi possível autenticar.' };
+    return { error: toFriendlySupabaseError(error, 'Não foi possível autenticar.') };
   }
 
   try {
     const session = await resolveProfileSession(data.user.id, data.user.email || email);
     return { session };
   } catch (err: any) {
-    return { error: err?.message || 'Erro ao carregar perfil da empresa.' };
+    return { error: toFriendlySupabaseError(err, 'Erro ao carregar perfil da empresa.') };
   }
 }
 
@@ -189,7 +231,7 @@ export async function signUpWithSupabase(payload: {
   });
 
   if (error) {
-    return { error: error.message || 'Não foi possível criar a conta.' };
+    return { error: toFriendlySupabaseError(error, 'Não foi possível criar a conta.') };
   }
 
   if (!data.session && data.user) {
@@ -210,7 +252,7 @@ export async function signUpWithSupabase(payload: {
       const session = await resolveProfileSession(data.user.id, email);
       return { session };
     } catch (err: any) {
-      return { error: err?.message || 'Conta criada, mas perfil não carregou.' };
+      return { error: toFriendlySupabaseError(err, 'Conta criada, mas perfil não carregou.') };
     }
   }
 
@@ -348,6 +390,7 @@ export async function loadCompanyDatabaseFromSupabase(
     ['entregas', deliveriesRes.error],
     ['retornos', returnsRes.error],
     ['estoque_itens', stockRes.error],
+    ['estoque_movimentacoes', stockMovRes.error],
     ['notas', notasRes.error],
     ['nota_itens', notaItensRes.error],
     ['despesas', despesasRes.error],
@@ -358,10 +401,13 @@ export async function loadCompanyDatabaseFromSupabase(
   ].filter(([, err]) => Boolean(err)) as Array<[string, { message?: string }]>;
 
   if (queryErrors.length > 0) {
-    const details = queryErrors
-      .map(([tbl, err]) => `${tbl}: ${err?.message || 'erro desconhecido'}`)
-      .join(' | ');
-    throw new Error(`Falha ao carregar dados do Supabase (${details}).`);
+    const firstMsg = toFriendlySupabaseError(
+      queryErrors[0][1],
+      'Verifique sua conexão e tente novamente.'
+    );
+    throw new Error(
+      `Falha ao carregar dados (${queryErrors.length} consulta(s)): ${firstMsg}`
+    );
   }
 
   const companies: Company[] = (companiesRes.data || []).map((c: any) => ({
@@ -617,7 +663,7 @@ export async function dbCreateCompany(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar empresa cliente.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -637,7 +683,49 @@ export async function dbSoftDeleteCompany(empresaId: string, dbUuid: string): Pr
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir empresa cliente.'));
+}
+
+export async function dbBulkSoftDeleteOrders(empresaId: string, dbUuids: string[]): Promise<void> {
+  if (dbUuids.length === 0) return;
+  const sb = getSupabaseClient();
+  const { error } = await sb
+    .from('ordens_servico')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('empresa_id', empresaId)
+    .in('id', dbUuids)
+    .is('deleted_at', null);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir ordens vinculadas.'));
+}
+
+export async function dbBulkSoftDeleteDeliveries(
+  empresaId: string,
+  dbUuids: string[]
+): Promise<void> {
+  if (dbUuids.length === 0) return;
+  const sb = getSupabaseClient();
+  const { error } = await sb
+    .from('entregas')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('empresa_id', empresaId)
+    .in('id', dbUuids)
+    .is('deleted_at', null);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir entregas vinculadas.'));
+}
+
+export async function dbBulkSoftDeleteReturns(
+  empresaId: string,
+  dbUuids: string[]
+): Promise<void> {
+  if (dbUuids.length === 0) return;
+  const sb = getSupabaseClient();
+  const { error } = await sb
+    .from('retornos')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('empresa_id', empresaId)
+    .in('id', dbUuids)
+    .is('deleted_at', null);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir retornos vinculados.'));
 }
 
 export async function dbCreateOrder(
@@ -670,7 +758,7 @@ export async function dbCreateOrder(
     .insert({
       id: generateUuid(),
       empresa_id: empresaId,
-      numero_os: numeroOs,
+      numero_os: numeroOs || 'AUTO',
       cliente_empresa_id: payload.companyUuid || null,
       cliente_codigo_legado: payload.companyId,
       cliente_nome: payload.companyName,
@@ -689,7 +777,7 @@ export async function dbCreateOrder(
     .select('*')
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao registrar Ordem de Serviço.'));
   return {
     id: data.numero_os,
     dbUuid: data.id,
@@ -724,7 +812,7 @@ export async function dbMoveOrderStage(
     p_etapa: targetStage,
     p_etapa_atualizada_em: stamp,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao mover faca na esteira.'));
   return {
     version: Number(data?.version) || 1,
     updatedAt: data?.updated_at || new Date().toISOString(),
@@ -752,7 +840,7 @@ export async function dbUpdateOrderPayment(
     })
     .eq('id', ordemUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar pagamento da OS.'));
 }
 
 export async function dbSoftDeleteOrder(empresaId: string, ordemUuid: string): Promise<void> {
@@ -762,7 +850,7 @@ export async function dbSoftDeleteOrder(empresaId: string, ordemUuid: string): P
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', ordemUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir Ordem de Serviço.'));
 }
 
 export async function dbCreateDelivery(
@@ -789,7 +877,7 @@ export async function dbCreateDelivery(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao registrar entrega.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -811,7 +899,7 @@ export async function dbSoftDeleteDelivery(empresaId: string, dbUuid: string): P
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir entrega.'));
 }
 
 export async function dbCreateReturn(
@@ -839,7 +927,7 @@ export async function dbCreateReturn(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao registrar retorno.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -867,7 +955,7 @@ export async function dbUpdateReturnStatus(
     .update({ status })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar status do retorno.'));
 }
 
 export async function dbSoftDeleteReturn(empresaId: string, dbUuid: string): Promise<void> {
@@ -877,7 +965,7 @@ export async function dbSoftDeleteReturn(empresaId: string, dbUuid: string): Pro
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir retorno.'));
 }
 
 // ESTOQUE (preserva todas as regras de negócio; persistência real + soft delete no Supabase)
@@ -904,7 +992,7 @@ export async function dbCreateStockItem(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar item de estoque.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -943,7 +1031,7 @@ export async function dbUpdateStockItem(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar item de estoque.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -967,7 +1055,7 @@ export async function dbSoftDeleteStockItem(empresaId: string, dbUuid: string): 
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir item de estoque.'));
 }
 
 export async function dbRegisterStockMovement(
@@ -998,7 +1086,7 @@ export async function dbRegisterStockMovement(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (upErr) throw new Error(upErr.message);
+  if (upErr) throw new Error(toFriendlySupabaseError(upErr, 'Erro ao atualizar saldo do estoque.'));
 
   const { data: movRow, error: movErr } = await sb
     .from('estoque_movimentacoes')
@@ -1019,7 +1107,7 @@ export async function dbRegisterStockMovement(
     })
     .select('*')
     .single();
-  if (movErr) throw new Error(movErr.message);
+  if (movErr) throw new Error(toFriendlySupabaseError(movErr, 'Erro ao registrar movimentação de estoque.'));
 
   return {
     updatedItem: {
@@ -1078,14 +1166,14 @@ export async function dbRevertStockMovement(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (upErr) throw new Error(upErr.message);
+  if (upErr) throw new Error(toFriendlySupabaseError(upErr, 'Erro ao estornar saldo do estoque.'));
 
   const { error: markErr } = await sb
     .from('estoque_movimentacoes')
     .update({ estornado_em: nowIso })
     .eq('id', movement.id)
     .eq('empresa_id', empresaId);
-  if (markErr) throw new Error(markErr.message);
+  if (markErr) throw new Error(toFriendlySupabaseError(markErr, 'Erro ao marcar movimentação como estornada.'));
 
   const { data: estRow, error: estErr } = await sb
     .from('estoque_movimentacoes')
@@ -1106,7 +1194,7 @@ export async function dbRevertStockMovement(
     })
     .select('*')
     .single();
-  if (estErr) throw new Error(estErr.message);
+  if (estErr) throw new Error(toFriendlySupabaseError(estErr, 'Erro ao registrar estorno de estoque.'));
 
   return {
     updatedItem: {
@@ -1171,15 +1259,18 @@ export async function dbSaveNote(
       })
       .eq('id', editingId)
       .eq('empresa_id', empresaId);
-    if (upErr) throw new Error(upErr.message);
+    if (upErr) throw new Error(toFriendlySupabaseError(upErr, 'Erro ao atualizar nota/pedido.'));
 
     // Soft-delete previous items cleanly
-    await sb
+    const { error: delItemsErr } = await sb
       .from('nota_itens')
       .update({ deleted_at: new Date().toISOString() })
       .eq('nota_id', editingId)
       .eq('empresa_id', empresaId)
       .is('deleted_at', null);
+    if (delItemsErr) {
+      throw new Error(toFriendlySupabaseError(delItemsErr, 'Erro ao atualizar itens da nota.'));
+    }
   } else {
     const { error: insErr } = await sb.from('notas').insert({
       id: noteId,
@@ -1197,7 +1288,7 @@ export async function dbSaveNote(
       status: payload.status,
       criado_por: actorName,
     });
-    if (insErr) throw new Error(insErr.message);
+    if (insErr) throw new Error(toFriendlySupabaseError(insErr, 'Erro ao criar nota/pedido.'));
   }
 
   const itemRows = payload.items.map((it) => ({
@@ -1211,21 +1302,28 @@ export async function dbSaveNote(
 
   if (itemRows.length > 0) {
     const { error: itemErr } = await sb.from('nota_itens').insert(itemRows);
-    if (itemErr) throw new Error(itemErr.message);
+    if (itemErr) throw new Error(toFriendlySupabaseError(itemErr, 'Erro ao salvar itens da nota.'));
   }
 
   const { data: savedNote, error: fetchErr } = await sb
     .from('notas')
     .select('*')
     .eq('id', noteId)
+    .eq('empresa_id', empresaId)
     .single();
-  if (fetchErr || !savedNote) throw new Error(fetchErr?.message || 'Erro ao recarregar nota.');
+  if (fetchErr || !savedNote) {
+    throw new Error(toFriendlySupabaseError(fetchErr, 'Erro ao recarregar nota salva.'));
+  }
 
-  const { data: savedItems } = await sb
+  const { data: savedItems, error: savedItemsErr } = await sb
     .from('nota_itens')
     .select('*')
     .eq('nota_id', noteId)
+    .eq('empresa_id', empresaId)
     .is('deleted_at', null);
+  if (savedItemsErr) {
+    throw new Error(toFriendlySupabaseError(savedItemsErr, 'Erro ao recarregar itens da nota.'));
+  }
 
   return {
     id: savedNote.id,
@@ -1266,24 +1364,25 @@ export async function dbUpdateNoteStatus(
     .update({ status })
     .eq('id', noteId)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar status da nota.'));
 }
 
 export async function dbSoftDeleteNote(empresaId: string, noteId: string): Promise<void> {
   const sb = getSupabaseClient();
   const stamp = new Date().toISOString();
-  await sb
+  const { error: itemsErr } = await sb
     .from('nota_itens')
     .update({ deleted_at: stamp })
     .eq('nota_id', noteId)
     .eq('empresa_id', empresaId)
     .is('deleted_at', null);
+  if (itemsErr) throw new Error(toFriendlySupabaseError(itemsErr, 'Erro ao excluir itens da nota.'));
   const { error } = await sb
     .from('notas')
     .update({ deleted_at: stamp })
     .eq('id', noteId)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir nota/pedido.'));
 }
 
 // ============================================================================
@@ -1319,7 +1418,7 @@ export async function dbCreateExpense(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar despesa.'));
   return {
     ...data,
     descricao: data.descricao || '',
@@ -1357,7 +1456,7 @@ export async function dbUpdateExpense(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar despesa.'));
   return {
     ...data,
     descricao: data.descricao || '',
@@ -1380,7 +1479,7 @@ export async function dbSoftDeleteExpense(
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', expenseId)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir despesa.'));
 }
 
 // PRESTADORES, FUNCIONÁRIOS FOLHA, INVESTIMENTOS
@@ -1405,7 +1504,7 @@ export async function dbCreateProvider(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar prestador.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1440,7 +1539,7 @@ export async function dbUpdateProvider(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar prestador.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1462,7 +1561,7 @@ export async function dbSoftDeleteProvider(empresaId: string, dbUuid: string): P
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir prestador.'));
 }
 
 export async function dbCreatePayrollEmployee(
@@ -1484,7 +1583,7 @@ export async function dbCreatePayrollEmployee(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar colaborador na folha.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1515,7 +1614,7 @@ export async function dbUpdatePayrollEmployee(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar colaborador na folha.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1538,7 +1637,7 @@ export async function dbSoftDeletePayrollEmployee(
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir colaborador da folha.'));
 }
 
 export async function dbCreateInvestment(
@@ -1568,7 +1667,7 @@ export async function dbCreateInvestment(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao registrar investimento.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1609,7 +1708,7 @@ export async function dbUpdateInvestment(
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar investimento.'));
   return {
     id: data.codigo_legado || data.id,
     dbUuid: data.id,
@@ -1631,7 +1730,7 @@ export async function dbSoftDeleteInvestment(empresaId: string, dbUuid: string):
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir investimento.'));
 }
 
 // ============================================================================
@@ -1648,7 +1747,19 @@ export async function invokeManageTeam(body: Record<string, unknown>): Promise<a
     body,
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (error) throw new Error(error.message || 'Erro ao gerenciar equipe.');
+  if (error) {
+    let errMsg = error.message || 'Erro ao gerenciar equipe.';
+    try {
+      const ctx = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        const parsed = await ctx.json();
+        if (parsed?.error) errMsg = parsed.error;
+      }
+    } catch {
+      // ignore parse fallback
+    }
+    throw new Error(errMsg);
+  }
   if (data?.error) throw new Error(data.error);
   return data;
 }
@@ -1717,17 +1828,26 @@ export async function dbUpdateCompanySettings(
     )
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(
+      toFriendlySupabaseError(error, 'Erro ao atualizar configurações de backup.')
+    );
+  }
   return data as CompanySettingsRecord;
 }
 
 export async function dbDismissBackupAlert(empresaId: string, logId: string): Promise<void> {
   const sb = getSupabaseClient();
-  await sb
+  const { error } = await sb
     .from('backup_logs')
     .update({ alerta_dispensado: true })
     .eq('id', logId)
     .eq('empresa_id', empresaId);
+  if (error) {
+    throw new Error(
+      toFriendlySupabaseError(error, 'Erro ao dispensar alerta de backup.')
+    );
+  }
 }
 
 export async function invokeBackupEngine(body: Record<string, unknown>): Promise<any> {

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Edit3, TrendingUp, Trash2, X } from 'lucide-react';
+import { Check, Edit3, Loader2, TrendingUp, Trash2, X } from 'lucide-react';
 import { InvestmentRecord, InvestmentType } from '../types/order';
 import {
   formatBRL,
@@ -14,12 +14,12 @@ interface InvestmentsSubsectionProps {
   investments: InvestmentRecord[];
   onAddInvestment: (
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdateInvestment: (
     id: string,
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeleteInvestment: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeleteInvestment: (id: string) => Promise<void> | void;
 }
 
 const INVESTMENT_CATEGORIES: InvestmentType[] = [
@@ -45,6 +45,8 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
   const [investedAmount, setInvestedAmount] = useState(0);
   const [currentAmount, setCurrentAmount] = useState(0);
   const [customCurrentTouched, setCustomCurrentTouched] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filteredInvestments = useMemo(() => {
     if (categoryFilter === 'todos') return investments;
@@ -80,9 +82,9 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
     setCustomCurrentTouched(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!assetName.trim() || investedAmount <= 0) return;
+    if (isSubmitting || !assetName.trim() || investedAmount <= 0) return;
     const resolvedCurrent =
       customCurrentTouched && currentAmount > 0 ? currentAmount : investedAmount;
 
@@ -94,12 +96,28 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
       investedAmount,
       currentAmount: resolvedCurrent,
     };
-    if (editId) {
-      onUpdateInvestment(editId, payload);
-    } else {
-      onAddInvestment(payload);
+    setIsSubmitting(true);
+    try {
+      const ok = editId
+        ? await onUpdateInvestment(editId, payload)
+        : await onAddInvestment(payload);
+      if (ok !== false) {
+        resetForm();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-    resetForm();
+  };
+
+  const handleDelete = async (id: string) => {
+    if (deletingId) return;
+    setDeletingId(id);
+    try {
+      await onDeleteInvestment(id);
+      if (editId === id) resetForm();
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const inputClass =
@@ -293,10 +311,20 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
 
           <button
             type="submit"
-            className="w-full min-h-[44px] py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            disabled={isSubmitting}
+            className="w-full min-h-[44px] py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-md flex items-center justify-center gap-2 cursor-pointer"
           >
-            <Check className="w-4 h-4" />
-            <span>{editId ? 'Salvar Alterações' : 'Registrar Investimento'}</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{editId ? 'Salvando...' : 'Registrando...'}</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                <span>{editId ? 'Salvar Alterações' : 'Registrar Investimento'}</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -394,15 +422,17 @@ export const InvestmentsSubsection: React.FC<InvestmentsSubsectionProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => {
-                          if (editId === inv.id) resetForm();
-                          onDeleteInvestment(inv.id);
-                        }}
-                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        disabled={Boolean(deletingId)}
+                        onClick={() => void handleDelete(inv.id)}
+                        className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Excluir investimento"
                         aria-label="Excluir investimento"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {deletingId === inv.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   </div>

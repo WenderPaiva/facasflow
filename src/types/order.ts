@@ -371,5 +371,9 @@ export interface RealtimeSyncEvent {
   actorRole: UserRole;
   timestamp: string;
   order?: DieOrder;
+  deletedOrderUuid?: string;
+  deletedOrderId?: string;
+  deletedOrderUuids?: string[];
+  deletedOrderIds?: string[];
   db?: EnterpriseDatabase;
 }

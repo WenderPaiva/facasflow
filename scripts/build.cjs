@@ -1,9 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const tsPath =
-  'C:/Users/wende/AppData/Local/Programs/Antigravity IDE/resources/app/extensions/node_modules/typescript/lib/typescript.js';
-const ts = require(tsPath);
+let ts;
+try {
+  ts = require('typescript');
+} catch {
+  ts = require('C:/Users/wende/AppData/Local/Programs/Antigravity IDE/resources/app/extensions/node_modules/typescript/lib/typescript.js');
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC_DIR = path.join(ROOT, 'src');

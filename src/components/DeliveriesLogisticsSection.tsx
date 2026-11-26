@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Check,
   Clock,
+  Loader2,
   MapPin,
   PackageCheck,
   Trash2,
@@ -15,8 +16,8 @@ interface DeliveriesLogisticsSectionProps {
   orders: DieOrder[];
   deliveries: DeliveryRecord[];
   prefillOrder?: DieOrder | null;
-  onAddDelivery: (delivery: Omit<DeliveryRecord, 'id'>) => void;
-  onDeleteDelivery: (deliveryId: string) => void;
+  onAddDelivery: (delivery: Omit<DeliveryRecord, 'id'>) => Promise<boolean> | boolean;
+  onDeleteDelivery: (deliveryId: string) => Promise<void> | void;
 }
 
 export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProps> = ({
@@ -39,6 +40,8 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
     ).padStart(2, '0')}`;
   });
   const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (prefillOrder) {
@@ -46,24 +49,50 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
     }
   }, [prefillOrder]);
 
+  useEffect(() => {
+    if (orders.length > 0 && !orders.some((o) => o.id === selectedOrderId)) {
+      const validPrefill =
+        prefillOrder && orders.some((o) => o.id === prefillOrder.id)
+          ? prefillOrder.id
+          : orders[0].id;
+      setSelectedOrderId(validPrefill);
+    }
+  }, [orders, selectedOrderId, prefillOrder]);
+
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOrder || !carrierName.trim()) return;
+    if (isSubmitting || !selectedOrder || !carrierName.trim()) return;
 
-    onAddDelivery({
-      orderId: selectedOrder.id,
-      toolDescription: selectedOrder.toolDescription,
-      companyName: selectedOrder.companyName,
-      method,
-      carrierOrPersonName: carrierName.trim(),
-      dispatchedAt: `${dispatchedDate} ${dispatchedTime}`,
-      notes: notes.trim() || undefined,
-    });
+    setIsSubmitting(true);
+    try {
+      const ok = await onAddDelivery({
+        orderId: selectedOrder.id,
+        toolDescription: selectedOrder.toolDescription,
+        companyName: selectedOrder.companyName,
+        method,
+        carrierOrPersonName: carrierName.trim(),
+        dispatchedAt: `${dispatchedDate} ${dispatchedTime}`,
+        notes: notes.trim() || undefined,
+      });
+      if (ok !== false) {
+        setCarrierName('');
+        setNotes('');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    setCarrierName('');
-    setNotes('');
+  const handleDelete = async (deliveryId: string) => {
+    if (deletingId) return;
+    setDeletingId(deliveryId);
+    try {
+      await onDeleteDelivery(deliveryId);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const inputClass =
@@ -203,10 +232,20 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
 
           <button
             type="submit"
-            className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+            disabled={isSubmitting || !selectedOrder}
+            className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
           >
-            <Check className="w-4 h-4 stroke-[2.5]" />
-            <span>Confirmar Registro de Saída</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Registrando Saída...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 stroke-[2.5]" />
+                <span>Confirmar Registro de Saída</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -234,6 +273,7 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
             ) : (
               deliveries.map((del) => {
                 const meta = DELIVERY_METHOD_META[del.method];
+                const isDeleting = deletingId === del.id;
                 return (
                   <div
                     key={del.id}
@@ -284,12 +324,17 @@ export const DeliveriesLogisticsSection: React.FC<DeliveriesLogisticsSectionProp
                       </div>
                       <button
                         type="button"
-                        onClick={() => onDeleteDelivery(del.id)}
-                        className="btn-compact w-9 h-9 rounded-2xl bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        disabled={Boolean(deletingId)}
+                        onClick={() => void handleDelete(del.id)}
+                        className="btn-compact w-9 h-9 rounded-2xl bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         title="Excluir registro de entrega"
                         aria-label="Excluir registro de entrega"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {isDeleting ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
                   </div>

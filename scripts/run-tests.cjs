@@ -4,9 +4,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createClient } = require('@supabase/supabase-js');
 
-const tsPath =
-  'C:/Users/wende/AppData/Local/Programs/Antigravity IDE/resources/app/extensions/node_modules/typescript/lib/typescript.js';
-const ts = require(tsPath);
+let ts;
+try {
+  ts = require('typescript');
+} catch {
+  ts = require('C:/Users/wende/AppData/Local/Programs/Antigravity IDE/resources/app/extensions/node_modules/typescript/lib/typescript.js');
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src');

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowRight,
   Check,
+  Loader2,
   ShieldAlert,
   Trash2,
   Wrench,
@@ -17,9 +18,9 @@ import {
 interface WarrantyReturnsSectionProps {
   orders: DieOrder[];
   returns: WarrantyReturnRecord[];
-  onAddReturn: (record: Omit<WarrantyReturnRecord, 'id'>) => void;
-  onUpdateReturnStatus: (id: string, nextStatus: ReturnStatus) => void;
-  onDeleteReturn: (returnId: string) => void;
+  onAddReturn: (record: Omit<WarrantyReturnRecord, 'id'>) => Promise<boolean> | boolean;
+  onUpdateReturnStatus: (id: string, nextStatus: ReturnStatus) => Promise<void> | void;
+  onDeleteReturn: (returnId: string) => Promise<void> | void;
 }
 
 export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
@@ -34,30 +35,64 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
   const [technicalAction, setTechnicalAction] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState('0');
   const [status, setStatus] = useState<ReturnStatus>('em_analise');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (orders.length > 0 && !orders.some((o) => o.id === selectedOrderId)) {
+      setSelectedOrderId(orders[0].id);
+    }
+  }, [orders, selectedOrderId]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOrder || !reason.trim() || !technicalAction.trim()) return;
+    if (isSubmitting || !selectedOrder || !reason.trim() || !technicalAction.trim()) return;
 
     const val = parseFloat(adjustmentAmount.replace(',', '.')) || 0;
-    onAddReturn({
-      orderId: selectedOrder.id,
-      companyName: selectedOrder.companyName,
-      toolDescription: selectedOrder.toolDescription,
-      reason: reason.trim(),
-      technicalAction: technicalAction.trim(),
-      adjustmentAmount: val,
-      status,
-      createdAt: `${toISODate()}`,
-      updatedAt: nowTimestampBR(),
-    });
+    setIsSubmitting(true);
+    try {
+      const ok = await onAddReturn({
+        orderId: selectedOrder.id,
+        companyName: selectedOrder.companyName,
+        toolDescription: selectedOrder.toolDescription,
+        reason: reason.trim(),
+        technicalAction: technicalAction.trim(),
+        adjustmentAmount: val,
+        status,
+        createdAt: `${toISODate()}`,
+        updatedAt: nowTimestampBR(),
+      });
+      if (ok !== false) {
+        setReason('');
+        setTechnicalAction('');
+        setAdjustmentAmount('0');
+        setStatus('em_analise');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    setReason('');
-    setTechnicalAction('');
-    setAdjustmentAmount('0');
-    setStatus('em_analise');
+  const handleStatusChange = async (id: string, nextStatus: ReturnStatus) => {
+    if (busyKey) return;
+    setBusyKey(`st:${id}`);
+    try {
+      await onUpdateReturnStatus(id, nextStatus);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (busyKey) return;
+    setBusyKey(`del:${id}`);
+    try {
+      await onDeleteReturn(id);
+    } finally {
+      setBusyKey(null);
+    }
   };
 
   const inputClass =
@@ -178,10 +213,20 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
 
           <button
             type="submit"
-            className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+            disabled={isSubmitting || !selectedOrder}
+            className="w-full py-3 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
           >
-            <Check className="w-4 h-4 stroke-[2.5]" />
-            <span>Registrar Ocorrência de Retorno</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Registrando Retorno...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 stroke-[2.5]" />
+                <span>Registrar Ocorrência de Retorno</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -207,6 +252,7 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
             ) : (
               returns.map((ret) => {
                 const stMeta = RETURN_STATUS_META[ret.status];
+                const isRowBusy = busyKey === `st:${ret.id}` || busyKey === `del:${ret.id}`;
                 return (
                   <div
                     key={ret.id}
@@ -252,12 +298,17 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
                         </div>
                         <button
                           type="button"
-                          onClick={() => onDeleteReturn(ret.id)}
-                          className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                          disabled={Boolean(busyKey)}
+                          onClick={() => void handleDelete(ret.id)}
+                          className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                           title="Excluir registro de retorno"
                           aria-label="Excluir registro de retorno"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          {busyKey === `del:${ret.id}` ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -285,8 +336,9 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
                             <button
                               key={st}
                               type="button"
-                              onClick={() => onUpdateReturnStatus(ret.id, st)}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                              disabled={isRowBusy}
+                              onClick={() => void handleStatusChange(ret.id, st)}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border disabled:opacity-60 transition cursor-pointer ${
                                 ret.status === st
                                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-white/40 shadow-sm'
                                   : 'liquid-glass-pill text-slate-700'
@@ -301,8 +353,9 @@ export const WarrantyReturnsSection: React.FC<WarrantyReturnsSectionProps> = ({
                       {stMeta.next && (
                         <button
                           type="button"
-                          onClick={() => onUpdateReturnStatus(ret.id, stMeta.next!)}
-                          className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white border border-white/40 shadow-sm flex items-center gap-1 transition cursor-pointer"
+                          disabled={isRowBusy}
+                          onClick={() => void handleStatusChange(ret.id, stMeta.next!)}
+                          className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white border border-white/40 shadow-sm flex items-center gap-1 transition cursor-pointer"
                         >
                           <span>Avançar p/ {RETURN_STATUS_META[stMeta.next].label}</span>
                           <ArrowRight className="w-3.5 h-3.5" />

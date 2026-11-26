@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -51,13 +51,49 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
   onOpenNewOrder,
   onSelectCompany,
 }) => {
-  const readyCount = orders.filter((o) => o.stage === 'faca_pronta').length;
-  const activeProductionCount = orders.length - readyCount;
-  const openReturnsCount = returns.filter((r) => r.status !== 'liberado').length;
-  const madeirasStock = stock.filter((s) => s.category === 'madeiras');
-  const laminasStock = stock.filter((s) => s.category === 'laminas');
-  const lowMadeiras = madeirasStock.filter((s) => s.quantity <= s.minStock);
-  const lowLaminas = laminasStock.filter((s) => s.quantity <= s.minStock);
+  const { readyCount, activeProductionCount, stageCounts, companyOrderCounts } = useMemo(() => {
+    let ready = 0;
+    const stages: Record<string, number> = {};
+    const compCounts: Record<string, number> = {};
+    for (const o of orders) {
+      if (o.stage === 'faca_pronta') ready += 1;
+      stages[o.stage] = (stages[o.stage] || 0) + 1;
+      compCounts[o.companyId] = (compCounts[o.companyId] || 0) + 1;
+    }
+    return {
+      readyCount: ready,
+      activeProductionCount: orders.length - ready,
+      stageCounts: stages,
+      companyOrderCounts: compCounts,
+    };
+  }, [orders]);
+
+  const openReturnsCount = useMemo(
+    () => returns.filter((r) => r.status !== 'liberado').length,
+    [returns]
+  );
+
+  const { madeirasStock, laminasStock, lowMadeiras, lowLaminas } = useMemo(() => {
+    const madeiras: StockItem[] = [];
+    const laminas: StockItem[] = [];
+    const lowM: StockItem[] = [];
+    const lowL: StockItem[] = [];
+    for (const s of stock) {
+      if (s.category === 'madeiras') {
+        madeiras.push(s);
+        if (s.quantity <= s.minStock) lowM.push(s);
+      } else {
+        laminas.push(s);
+        if (s.quantity <= s.minStock) lowL.push(s);
+      }
+    }
+    return {
+      madeirasStock: madeiras,
+      laminasStock: laminas,
+      lowMadeiras: lowM,
+      lowLaminas: lowL,
+    };
+  }, [stock]);
 
   return (
     <div className="space-y-5">
@@ -466,7 +502,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {PRODUCTION_STAGES.map((st) => {
-            const count = orders.filter((o) => o.stage === st.id).length;
+            const count = stageCounts[st.id] || 0;
             return (
               <div
                 key={st.id}
@@ -519,9 +555,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
                 </div>
               ) : (
                 companies.slice(0, 4).map((comp) => {
-                  const compOrders = orders.filter(
-                    (o) => o.companyId === comp.id
-                  );
+                  const compCount = companyOrderCounts[comp.id] || 0;
                   return (
                     <div
                       key={comp.id}
@@ -540,7 +574,7 @@ export const BentoOverviewSection: React.FC<BentoOverviewSectionProps> = ({
                         </span>
                       </div>
                       <span className="px-2.5 py-1 rounded-full bg-white/65 border border-white/80 text-slate-800 text-xs font-extrabold shrink-0">
-                        {compOrders.length} facas
+                        {compCount} facas
                       </span>
                     </div>
                   );

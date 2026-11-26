@@ -318,7 +318,11 @@ const SidebarBody: React.FC<{
               {userName}
             </p>
             <p className="text-[11px] text-slate-600 font-semibold truncate">
-              {userRole === 'operador' ? 'Produção' : 'Administrador'}
+              {userRole === 'operador'
+                ? 'Produção'
+                : userRole === 'cliente'
+                ? 'Cliente'
+                : 'Administrador'}
             </p>
           </div>
         </div>

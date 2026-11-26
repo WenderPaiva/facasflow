@@ -813,67 +813,55 @@ export async function moveOrderStageOnServer(params: {
   return data?.order || null;
 }
 
-export function getNextOrderId(db: EnterpriseDatabase): string {
+function getNextPrefixedCode(
+  items: { id?: string }[] | undefined,
+  prefix: string,
+  padLength = 3
+): string {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matcher = new RegExp(`^${escaped}-(\\d+)$`, 'i');
   let max = 0;
-  for (const o of db.orders) {
-    const num = parseInt(o.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
+  for (const item of items || []) {
+    const idStr = String(item?.id || '').trim();
+    const match = matcher.exec(idStr);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!Number.isNaN(num) && num > max) max = num;
+    }
   }
-  return `OS-${String(max + 1).padStart(3, '0')}`;
+  return `${prefix}-${String(max + 1).padStart(padLength, '0')}`;
+}
+
+export function getNextCompanyCode(companies: { id: string }[]): string {
+  return getNextPrefixedCode(companies, 'EMP', 3);
+}
+
+export function getNextOrderId(db: EnterpriseDatabase): string {
+  return getNextPrefixedCode(db.orders, 'OS', 3);
 }
 
 export function getNextDeliveryId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const d of db.deliveries) {
-    const num = parseInt(d.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `ENT-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.deliveries, 'ENT', 3);
 }
 
 export function getNextReturnId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const r of db.returns) {
-    const num = parseInt(r.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `RET-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.returns, 'RET', 3);
 }
 
 export function getNextStockId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const s of db.stock || []) {
-    const num = parseInt(s.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `EST-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.stock, 'EST', 3);
 }
 
 export function getNextProviderId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const p of db.serviceProviders || []) {
-    const num = parseInt(p.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `PST-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.serviceProviders, 'PST', 3);
 }
 
 export function getNextPayrollEmployeeId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const e of db.payrollEmployees || []) {
-    const num = parseInt(e.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `FUN-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.payrollEmployees, 'FUN', 3);
 }
 
 export function getNextInvestmentId(db: EnterpriseDatabase): string {
-  let max = 0;
-  for (const i of db.investments || []) {
-    const num = parseInt(i.id.replace(/\D/g, ''), 10);
-    if (!Number.isNaN(num) && num > max) max = num;
-  }
-  return `INV-${String(max + 1).padStart(3, '0')}`;
+  return getNextPrefixedCode(db.investments, 'INV', 3);
 }
 
 export function getNextNoteNumber(db: EnterpriseDatabase): number {

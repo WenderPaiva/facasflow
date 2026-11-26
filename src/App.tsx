@@ -32,6 +32,9 @@ import {
 } from './services/realtimeEngine';
 import { getSupabaseClient } from './services/supabaseClient';
 import {
+  dbBulkSoftDeleteDeliveries,
+  dbBulkSoftDeleteOrders,
+  dbBulkSoftDeleteReturns,
   dbCreateCompany,
   dbCreateDelivery,
   dbCreateExpense,
@@ -74,6 +77,7 @@ import {
   signOutSupabase,
 } from './services/supabaseDataService';
 import {
+  getNextCompanyCode,
   getNextDeliveryId,
   getNextInvestmentId,
   getNextNoteNumber,
@@ -191,6 +195,9 @@ export const App: React.FC = () => {
   const sessionRef = useRef<AuthSession | null>(session);
   sessionRef.current = session;
   const autoBackupTimerRef = useRef<number | null>(null);
+  const hydrationSeqRef = useRef(0);
+  const moveErrorTimerRef = useRef<number | null>(null);
+  const printTimerRef = useRef<number | null>(null);
 
   const [moveError, setMoveError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
@@ -232,6 +239,7 @@ export const App: React.FC = () => {
       setSettingsState((prev) => ({ ...prev, loading: true }));
       try {
         const res = await dbLoadSettingsAndBackups(empresaId);
+        if (!sessionRef.current?.isSuperAdmin) return;
         setSettingsState({
           settings: res.settings,
           backups: res.backups,
@@ -247,7 +255,15 @@ export const App: React.FC = () => {
 
   const hydrateFromSupabase = useCallback(
     async (activeSession: AuthSession) => {
+      if (activeSession.role === 'cliente') {
+        hydrationSeqRef.current += 1;
+        setDb(createEmptyDb());
+        setDbError(null);
+        setDbLoading(false);
+        return;
+      }
       const targetEmpresaId = activeSession.empresaId || activeSession.company_id;
+      const seq = ++hydrationSeqRef.current;
       setDbLoading(true);
       setDbError(null);
       try {
@@ -255,6 +271,7 @@ export const App: React.FC = () => {
           targetEmpresaId,
           activeSession.role
         );
+        if (seq !== hydrationSeqRef.current) return;
         setDb(loaded);
         setSelectedCompanyId((prev) =>
           prev && loaded.companies.some((c) => c.id === prev)
@@ -265,12 +282,15 @@ export const App: React.FC = () => {
           await refreshSettingsAndBackups(targetEmpresaId, activeSession.isSuperAdmin);
         }
       } catch (err: any) {
+        if (seq !== hydrationSeqRef.current) return;
         setDbError(
           err?.message ||
             'Não foi possível carregar os dados da empresa no Supabase.'
         );
       } finally {
-        setDbLoading(false);
+        if (seq === hydrationSeqRef.current) {
+          setDbLoading(false);
+        }
       }
     },
     [refreshSettingsAndBackups]
@@ -282,22 +302,24 @@ export const App: React.FC = () => {
     if (!active || active.role !== 'admin') return;
     if (settingsState.settings.backup_automatico === false) return;
 
-    const empresaId = active.empresaId || active.company_id;
     if (autoBackupTimerRef.current) {
       window.clearTimeout(autoBackupTimerRef.current);
     }
     autoBackupTimerRef.current = window.setTimeout(async () => {
+      const latest = sessionRef.current;
+      if (!latest || latest.role !== 'admin') return;
+      const empresaId = latest.empresaId || latest.company_id;
       try {
         await invokeBackupEngine({
           action: 'snapshot_company',
           tipo: 'automatico',
           debounced: true,
         });
-        if (active.isSuperAdmin) {
+        if (sessionRef.current?.isSuperAdmin) {
           await refreshSettingsAndBackups(empresaId, true);
         }
       } catch {
-        if (active.isSuperAdmin) {
+        if (sessionRef.current?.isSuperAdmin) {
           await refreshSettingsAndBackups(empresaId, true);
         }
       }
@@ -315,7 +337,7 @@ export const App: React.FC = () => {
         if (restored) {
           setSession(restored);
           setActiveSection(
-            restored.role === 'operador' ? 'esteira' : 'bento_home'
+            restored.role === 'admin' ? 'bento_home' : 'esteira'
           );
           await hydrateFromSupabase(restored);
         }
@@ -327,9 +349,21 @@ export const App: React.FC = () => {
     const { data: authListener } = sb.auth.onAuthStateChange((event) => {
       if (!mounted) return;
       if (event === 'SIGNED_OUT') {
+        hydrationSeqRef.current += 1;
         if (autoBackupTimerRef.current) {
           window.clearTimeout(autoBackupTimerRef.current);
         }
+        if (toastTimerRef.current) {
+          window.clearTimeout(toastTimerRef.current);
+        }
+        if (moveErrorTimerRef.current) {
+          window.clearTimeout(moveErrorTimerRef.current);
+        }
+        if (printTimerRef.current) {
+          window.clearTimeout(printTimerRef.current);
+        }
+        pendingOrderIdsRef.current.clear();
+        setPendingOrderIds([]);
         setSession(null);
         setDb(createEmptyDb());
       }
@@ -340,6 +374,15 @@ export const App: React.FC = () => {
       authListener?.subscription?.unsubscribe();
       if (autoBackupTimerRef.current) {
         window.clearTimeout(autoBackupTimerRef.current);
+      }
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      if (moveErrorTimerRef.current) {
+        window.clearTimeout(moveErrorTimerRef.current);
+      }
+      if (printTimerRef.current) {
+        window.clearTimeout(printTimerRef.current);
       }
     };
   }, [hydrateFromSupabase]);
@@ -356,34 +399,50 @@ export const App: React.FC = () => {
   // Realtime listener (read-only UI sync per empresa_id; no ping-pong writebacks)
   useEffect(() => {
     (window as any).__facasflowChannelCount = getActiveRealtimeChannelCount;
-    const empresaId = session?.empresaId || session?.company_id;
-    if (!empresaId) return;
+    const targetEmpresaId = session?.empresaId || session?.company_id;
+    if (!targetEmpresaId || session?.role === 'cliente') return;
 
     const unsubscribe = subscribeToCompanyRealtime(
-      empresaId,
+      targetEmpresaId,
       (remoteEvent) => {
         setDb((prev) => {
+          const delUuids = new Set<string>(remoteEvent.deletedOrderUuids || []);
+          if (remoteEvent.deletedOrderUuid) delUuids.add(remoteEvent.deletedOrderUuid);
+          const delIds = new Set<string>(remoteEvent.deletedOrderIds || []);
+          if (remoteEvent.deletedOrderId) delIds.add(remoteEvent.deletedOrderId);
+
+          if (delUuids.size > 0 || delIds.size > 0) {
+            const removedIds = new Set<string>(delIds);
+            for (const o of prev.orders) {
+              if (o.dbUuid && delUuids.has(o.dbUuid)) removedIds.add(o.id);
+            }
+            return {
+              ...prev,
+              orders: prev.orders.filter(
+                (o) => !((o.dbUuid && delUuids.has(o.dbUuid)) || removedIds.has(o.id))
+              ),
+              deliveries: prev.deliveries.filter((d) => !removedIds.has(d.orderId)),
+              returns: prev.returns.filter((r) => !removedIds.has(r.orderId)),
+            };
+          }
           if (remoteEvent.order) {
             const incoming = remoteEvent.order;
             if (pendingOrderIdsRef.current.has(incoming.id)) {
               return prev;
             }
-            const existing = prev.orders.find(
-              (o) =>
-                (incoming.dbUuid && o.dbUuid === incoming.dbUuid) ||
-                o.id === incoming.id
+            const existing = prev.orders.find((o) =>
+              incoming.dbUuid && o.dbUuid ? o.dbUuid === incoming.dbUuid : o.id === incoming.id
             );
             if (existing && !isNewerOrder(incoming, existing)) {
               return prev;
             }
             const nextOrders = existing
               ? prev.orders.map((o) =>
-                  (incoming.dbUuid && o.dbUuid === incoming.dbUuid) ||
-                  o.id === incoming.id
+                  (incoming.dbUuid && o.dbUuid ? o.dbUuid === incoming.dbUuid : o.id === incoming.id)
                     ? { ...o, ...incoming }
                     : o
                 )
-              : [incoming, ...prev.orders];
+              : [incoming, ...prev.orders.filter((o) => o.id !== incoming.id)];
             return { ...prev, orders: nextOrders };
           }
           return prev;
@@ -398,12 +457,12 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [session?.empresaId, session?.company_id]);
+  }, [session?.empresaId, session?.company_id, session?.role]);
 
   const handleAuthenticated = async (newSession: AuthSession) => {
     setSession(newSession);
     setSelectedCompanyId(null);
-    setActiveSection(newSession.role === 'operador' ? 'esteira' : 'bento_home');
+    setActiveSection(newSession.role === 'admin' ? 'bento_home' : 'esteira');
     setSearchQuery('');
     await hydrateFromSupabase(newSession);
     showToast(
@@ -413,10 +472,24 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
+    hydrationSeqRef.current += 1;
     if (autoBackupTimerRef.current) {
       window.clearTimeout(autoBackupTimerRef.current);
     }
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    if (moveErrorTimerRef.current) {
+      window.clearTimeout(moveErrorTimerRef.current);
+    }
+    if (printTimerRef.current) {
+      window.clearTimeout(printTimerRef.current);
+    }
+    pendingOrderIdsRef.current.clear();
+    setPendingOrderIds([]);
+    setMoveError(null);
+    setToast(null);
     try {
       await signOutSupabase();
     } catch {
@@ -437,22 +510,31 @@ export const App: React.FC = () => {
       logs: [],
       loading: false,
     });
-  };
+  }, []);
 
-  const handleSelectSection = (target: ActiveSection) => {
-    if (target === 'configuracoes' && !session?.isSuperAdmin) {
-      setActiveSection(session?.role === 'operador' ? 'esteira' : 'bento_home');
-      return;
-    }
-    if (
-      session?.role === 'operador' &&
-      !OPERATOR_ALLOWED_SECTIONS.includes(target)
-    ) {
-      setActiveSection('esteira');
-      return;
-    }
-    setActiveSection(target);
-  };
+  const handleSelectSection = useCallback(
+    (target: ActiveSection) => {
+      const currentSession = sessionRef.current;
+      if (!currentSession || currentSession.role === 'cliente') {
+        return;
+      }
+      if (target === 'configuracoes' && !currentSession.isSuperAdmin) {
+        setActiveSection(
+          currentSession.role === 'operador' ? 'esteira' : 'bento_home'
+        );
+        return;
+      }
+      if (
+        currentSession.role === 'operador' &&
+        !OPERATOR_ALLOWED_SECTIONS.includes(target)
+      ) {
+        setActiveSection('esteira');
+        return;
+      }
+      setActiveSection(target);
+    },
+    []
+  );
 
   const empresaId = session?.empresaId || session?.company_id || '';
 
@@ -480,22 +562,20 @@ export const App: React.FC = () => {
   }, [db.companies, searchQuery]);
 
   const financials = useMemo(
-    () => computeFinancialBreakdown(filteredOrders),
-    [filteredOrders]
+    () => computeFinancialBreakdown(db.orders),
+    [db.orders]
   );
 
   const nextOrderId = useMemo(() => getNextOrderId(db), [db]);
 
   // CRUD Handlers — Direct Supabase Persistence (Soft Delete)
-  const handleAddCompany = async (newCompData: Omit<Company, 'id'>) => {
-    if (!session || session.role !== 'admin') return;
+  const handleAddCompany = async (
+    newCompData: Omit<Company, 'id'>
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
     try {
-      let maxNum = 0;
-      for (const c of db.companies) {
-        const n = parseInt(c.id.replace(/\D/g, ''), 10);
-        if (!Number.isNaN(n) && n > maxNum) maxNum = n;
-      }
-      const newCode = `EMP-${String(maxNum + 1).padStart(2, '0')}`;
+      const newCode = getNextCompanyCode(dbRef.current.companies);
       const created = await dbCreateCompany(empresaId, newCode, newCompData);
       setDb((prev) => ({
         ...prev,
@@ -504,30 +584,39 @@ export const App: React.FC = () => {
       setSelectedCompanyId(created.id);
       scheduleAutoBackup();
       showToast(`Empresa "${created.corporateName}" cadastrada!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao cadastrar empresa.', 'err');
+      return false;
     }
   };
 
   const handleDeleteCompany = async (companyId: string) => {
-    if (!session || session.role !== 'admin') return;
-    const comp = db.companies.find((c) => c.id === companyId);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const snap = dbRef.current;
+    const comp = snap.companies.find((c) => c.id === companyId);
     if (!comp?.dbUuid) return;
     try {
-      const removedOrders = db.orders.filter((o) => o.companyId === companyId);
+      const removedOrders = snap.orders.filter((o) => o.companyId === companyId);
       const removedOrderIds = new Set(removedOrders.map((o) => o.id));
+      const returnUuids = snap.returns
+        .filter((r) => removedOrderIds.has(r.orderId) && r.dbUuid)
+        .map((r) => r.dbUuid!);
+      const deliveryUuids = snap.deliveries
+        .filter((d) => removedOrderIds.has(d.orderId) && d.dbUuid)
+        .map((d) => d.dbUuid!);
+      const orderUuids = removedOrders
+        .filter((o) => o.dbUuid)
+        .map((o) => o.dbUuid!);
+
       await Promise.all([
-        ...db.returns
-          .filter((r) => removedOrderIds.has(r.orderId) && r.dbUuid)
-          .map((r) => dbSoftDeleteReturn(empresaId, r.dbUuid!)),
-        ...db.deliveries
-          .filter((d) => removedOrderIds.has(d.orderId) && d.dbUuid)
-          .map((d) => dbSoftDeleteDelivery(empresaId, d.dbUuid!)),
-        ...removedOrders
-          .filter((o) => o.dbUuid)
-          .map((o) => dbSoftDeleteOrder(empresaId, o.dbUuid!)),
+        dbBulkSoftDeleteReturns(targetEmpresaId, returnUuids),
+        dbBulkSoftDeleteDeliveries(targetEmpresaId, deliveryUuids),
+        dbBulkSoftDeleteOrders(targetEmpresaId, orderUuids),
       ]);
-      await dbSoftDeleteCompany(empresaId, comp.dbUuid);
+      await dbSoftDeleteCompany(targetEmpresaId, comp.dbUuid);
 
       setDb((prev) => {
         const nextCompanies = prev.companies.filter((c) => c.id !== companyId);
@@ -541,8 +630,20 @@ export const App: React.FC = () => {
           returns: prev.returns.filter((r) => !removedOrderIds.has(r.orderId)),
         };
       });
-      if (selectedCompanyId === companyId) {
-        setSelectedCompanyId(null);
+      setSelectedCompanyId((prev) => (prev === companyId ? null : prev));
+      setPrefillDeliveryOrder((prev) =>
+        prev && removedOrderIds.has(prev.id) ? null : prev
+      );
+      if (removedOrders.length > 0) {
+        publishRealtimeUpdate({
+          company_id: targetEmpresaId,
+          section: 'esteira',
+          actionLabel: '',
+          actorName: active.ownerName,
+          actorRole: active.role,
+          deletedOrderUuids: orderUuids,
+          deletedOrderIds: Array.from(removedOrderIds),
+        });
       }
       scheduleAutoBackup();
       showToast(`Empresa "${comp.corporateName}" apagada!`);
@@ -559,20 +660,23 @@ export const App: React.FC = () => {
     amount: number;
     paymentModality: PaymentModality;
     stage: ProductionStage;
-  }) => {
-    if (!session) return;
+  }): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
+      showToast('Apenas administradores podem cadastrar novas OS.', 'err');
+      return false;
+    }
     try {
       const stamp = nowTimestampBR();
-      let existingComp = db.companies.find((c) => c.id === payload.companyId);
+      const snap = dbRef.current;
+      let existingComp =
+        payload.companyId && payload.companyId !== '__new__'
+          ? snap.companies.find((c) => c.id === payload.companyId)
+          : undefined;
       let newCompCreated: Company | null = null;
 
       if (!existingComp) {
-        let maxNum = 0;
-        for (const c of db.companies) {
-          const n = parseInt(c.id.replace(/\D/g, ''), 10);
-          if (!Number.isNaN(n) && n > maxNum) maxNum = n;
-        }
-        const compCode = `EMP-${String(maxNum + 1).padStart(2, '0')}`;
+        const compCode = getNextCompanyCode(snap.companies);
         newCompCreated = await dbCreateCompany(empresaId, compCode, {
           corporateName: payload.companyName,
           cnpj: 'Não informado',
@@ -582,7 +686,7 @@ export const App: React.FC = () => {
         existingComp = newCompCreated;
       }
 
-      const createdOrder = await dbCreateOrder(empresaId, nextOrderId, {
+      const createdOrder = await dbCreateOrder(empresaId, 'AUTO', {
         companyId: existingComp.id,
         companyUuid: existingComp.dbUuid,
         companyName: existingComp.corporateName,
@@ -601,23 +705,32 @@ export const App: React.FC = () => {
           : prev.companies,
         orders: [createdOrder, ...prev.orders],
       }));
-      if (!selectedCompanyId) {
-        setSelectedCompanyId(existingComp.id);
-      }
+      setSelectedCompanyId((prev) => prev || existingComp!.id);
+      publishRealtimeUpdate({
+        company_id: empresaId,
+        section: 'esteira',
+        actionLabel: '',
+        actorName: active.ownerName,
+        actorRole: active.role,
+        order: createdOrder,
+      });
       const stageLabel =
         PRODUCTION_STAGES.find((s) => s.id === payload.stage)?.label ||
         payload.stage;
       scheduleAutoBackup();
       showToast(`${createdOrder.id} criada em "${stageLabel}"!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao criar Ordem de Serviço.', 'err');
+      return false;
     }
   };
 
   // Seção 2 • Esteira Física de Produção (Optimistic single card + RPC mover_faca_v2)
   const handleMoveStage = useCallback(
     async (orderId: string, targetStage: ProductionStage) => {
-      if (!session) return;
+      const active = sessionRef.current;
+      if (!active || active.role === 'cliente') return;
       const currentOrder = dbRef.current.orders.find((o) => o.id === orderId);
       if (!currentOrder || currentOrder.stage === targetStage) return;
       if (!currentOrder.dbUuid) return;
@@ -625,7 +738,13 @@ export const App: React.FC = () => {
 
       const stamp = nowTimestampBR();
       const nowIso = new Date().toISOString();
-      const previousOrder = { ...currentOrder };
+      const previousStageState = {
+        stage: currentOrder.stage,
+        stageUpdatedAt: currentOrder.stageUpdatedAt,
+        stageHistory: currentOrder.stageHistory,
+        version: currentOrder.version,
+        updatedAt: currentOrder.updatedAt,
+      };
       const optimisticOrder: DieOrder = {
         ...currentOrder,
         stage: targetStage,
@@ -663,7 +782,7 @@ export const App: React.FC = () => {
         setDb((prev) => ({
           ...prev,
           orders: prev.orders.map((o) =>
-            o.id === orderId ? authoritativeOrder : o
+            o.id === orderId ? { ...o, ...authoritativeOrder } : o
           ),
         }));
 
@@ -671,30 +790,39 @@ export const App: React.FC = () => {
           company_id: empresaId,
           section: 'esteira',
           actionLabel: '',
-          actorName: session.ownerName,
-          actorRole: session.role,
+          actorName: active.ownerName,
+          actorRole: active.role,
           order: authoritativeOrder,
         });
         scheduleAutoBackup();
-      } catch {
+      } catch (err: any) {
         pendingOrderIdsRef.current.delete(orderId);
         setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
         setDb((prev) => ({
           ...prev,
           orders: prev.orders.map((o) =>
-            o.id === orderId ? previousOrder : o
+            o.id === orderId ? { ...o, ...previousStageState } : o
           ),
         }));
-        setMoveError(`Não foi possível mover ${orderId}. Estado restaurado.`);
-        window.setTimeout(() => setMoveError(null), 4000);
+        setMoveError(
+          err?.message || `Não foi possível mover ${orderId}. Estado restaurado.`
+        );
+        if (moveErrorTimerRef.current) {
+          window.clearTimeout(moveErrorTimerRef.current);
+        }
+        moveErrorTimerRef.current = window.setTimeout(
+          () => setMoveError(null),
+          4000
+        );
       }
     },
-    [session, empresaId, scheduleAutoBackup]
+    [empresaId, scheduleAutoBackup]
   );
 
   const handleTogglePaid = async (orderId: string) => {
-    if (!session) return;
-    const order = db.orders.find((o) => o.id === orderId);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const order = dbRef.current.orders.find((o) => o.id === orderId);
     if (!order?.dbUuid) return;
 
     const today = toISODate();
@@ -735,8 +863,9 @@ export const App: React.FC = () => {
   };
 
   const handleEmitBilling30d = async (orderId: string) => {
-    if (!session) return;
-    const order = db.orders.find((o) => o.id === orderId);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const order = dbRef.current.orders.find((o) => o.id === orderId);
     if (!order?.dbUuid) return;
 
     const today = toISODate();
@@ -770,40 +899,77 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
-    if (!session) return;
-    const target = db.orders.find((o) => o.id === orderId);
-    if (!target?.dbUuid) return;
+  const handleDeleteOrder = useCallback(
+    async (orderId: string) => {
+      const active = sessionRef.current;
+      if (!active || active.role !== 'admin') return;
+      if (pendingOrderIdsRef.current.has(orderId)) return;
+      const targetEmpresaId = active.empresaId || active.company_id;
+      const snap = dbRef.current;
+      const target = snap.orders.find((o) => o.id === orderId);
+      if (!target?.dbUuid) return;
 
-    try {
-      await Promise.all([
-        ...db.deliveries
+      pendingOrderIdsRef.current.add(orderId);
+      setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
+      try {
+        const deliveryUuids = snap.deliveries
           .filter((d) => d.orderId === orderId && d.dbUuid)
-          .map((d) => dbSoftDeleteDelivery(empresaId, d.dbUuid!)),
-        ...db.returns
+          .map((d) => d.dbUuid!);
+        const returnUuids = snap.returns
           .filter((r) => r.orderId === orderId && r.dbUuid)
-          .map((r) => dbSoftDeleteReturn(empresaId, r.dbUuid!)),
-      ]);
-      await dbSoftDeleteOrder(empresaId, target.dbUuid);
-      setDb((prev) => ({
-        ...prev,
-        orders: prev.orders.filter((o) => o.id !== orderId),
-        deliveries: prev.deliveries.filter((d) => d.orderId !== orderId),
-        returns: prev.returns.filter((r) => r.orderId !== orderId),
-      }));
-      scheduleAutoBackup();
-      showToast(`Ordem ${orderId} removida com sucesso!`);
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao apagar OS.', 'err');
-    }
-  };
+          .map((r) => r.dbUuid!);
+
+        await Promise.all([
+          dbBulkSoftDeleteDeliveries(targetEmpresaId, deliveryUuids),
+          dbBulkSoftDeleteReturns(targetEmpresaId, returnUuids),
+        ]);
+        await dbSoftDeleteOrder(targetEmpresaId, target.dbUuid);
+        setDb((prev) => ({
+          ...prev,
+          orders: prev.orders.filter((o) => o.id !== orderId),
+          deliveries: prev.deliveries.filter((d) => d.orderId !== orderId),
+          returns: prev.returns.filter((r) => r.orderId !== orderId),
+        }));
+        setPrefillDeliveryOrder((prev) => (prev?.id === orderId ? null : prev));
+        publishRealtimeUpdate({
+          company_id: targetEmpresaId,
+          section: 'esteira',
+          actionLabel: '',
+          actorName: active.ownerName,
+          actorRole: active.role,
+          deletedOrderUuid: target.dbUuid,
+          deletedOrderId: target.id,
+        });
+        scheduleAutoBackup();
+        showToast(`Ordem ${orderId} removida com sucesso!`);
+      } catch (err: any) {
+        showToast(err?.message || 'Erro ao apagar OS.', 'err');
+      } finally {
+        pendingOrderIdsRef.current.delete(orderId);
+        setPendingOrderIds(Array.from(pendingOrderIdsRef.current));
+      }
+    },
+    [scheduleAutoBackup, showToast]
+  );
+
+  const handleQuickRegisterDelivery = useCallback(
+    (order: DieOrder) => {
+      setPrefillDeliveryOrder(order);
+      handleSelectSection('entregas');
+    },
+    [handleSelectSection]
+  );
 
   // Seção 4 • Entregas
-  const handleAddDelivery = async (deliveryData: Omit<DeliveryRecord, 'id'>) => {
-    if (!session) return;
+  const handleAddDelivery = async (
+    deliveryData: Omit<DeliveryRecord, 'id'>
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return false;
     try {
-      const code = getNextDeliveryId(db);
-      const ord = db.orders.find((o) => o.id === deliveryData.orderId);
+      const snap = dbRef.current;
+      const code = getNextDeliveryId(snap);
+      const ord = snap.orders.find((o) => o.id === deliveryData.orderId);
       const created = await dbCreateDelivery(
         empresaId,
         code,
@@ -811,38 +977,66 @@ export const App: React.FC = () => {
         ord?.dbUuid
       );
 
-      let movedVer = ord?.version || 1;
-      const stamp = nowTimestampBR();
-      if (ord?.dbUuid && ord.stage !== 'faca_pronta') {
-        const rpcRes = await dbMoveOrderStage(ord.dbUuid, 'faca_pronta', stamp);
-        movedVer = rpcRes.version ?? movedVer + 1;
-      }
-
       setDb((prev) => ({
         ...prev,
         deliveries: [created, ...prev.deliveries],
-        orders: prev.orders.map((o) =>
-          o.id === deliveryData.orderId
-            ? {
-                ...o,
-                stage: 'faca_pronta',
-                stageUpdatedAt: stamp,
-                version: movedVer,
-                updatedAt: new Date().toISOString(),
-              }
-            : o
-        ),
       }));
+
+      let stageWarning: string | null = null;
+      if (ord?.dbUuid && ord.stage !== 'faca_pronta') {
+        const stamp = nowTimestampBR();
+        try {
+          const rpcRes = await dbMoveOrderStage(ord.dbUuid, 'faca_pronta', stamp);
+          const updatedOrder: DieOrder = {
+            ...ord,
+            stage: 'faca_pronta',
+            stageUpdatedAt: stamp,
+            stageHistory: [
+              ...(ord.stageHistory || []),
+              { stage: 'faca_pronta', timestamp: stamp },
+            ],
+            version: rpcRes.version ?? (Number(ord.version) || 1) + 1,
+            updatedAt: rpcRes.updatedAt ?? new Date().toISOString(),
+          };
+          setDb((prev) => ({
+            ...prev,
+            orders: prev.orders.map((o) =>
+              o.id === deliveryData.orderId ? { ...o, ...updatedOrder } : o
+            ),
+          }));
+          publishRealtimeUpdate({
+            company_id: empresaId,
+            section: 'esteira',
+            actionLabel: '',
+            actorName: active.ownerName,
+            actorRole: active.role,
+            order: updatedOrder,
+          });
+        } catch (moveErr: any) {
+          stageWarning = moveErr?.message || 'não foi possível atualizar etapa na esteira';
+        }
+      }
+
       scheduleAutoBackup();
-      showToast(`Saída logística da ${deliveryData.orderId} registrada!`);
+      if (stageWarning) {
+        showToast(
+          `Saída logística registrada, porém: ${stageWarning}.`,
+          'err'
+        );
+      } else {
+        showToast(`Saída logística da ${deliveryData.orderId} registrada!`);
+      }
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao registrar entrega.', 'err');
+      return false;
     }
   };
 
   const handleDeleteDelivery = async (deliveryId: string) => {
-    if (!session) return;
-    const del = db.deliveries.find((d) => d.id === deliveryId);
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
+    const del = dbRef.current.deliveries.find((d) => d.id === deliveryId);
     if (!del?.dbUuid) return;
     try {
       await dbSoftDeleteDelivery(empresaId, del.dbUuid);
@@ -858,11 +1052,15 @@ export const App: React.FC = () => {
   };
 
   // Seção 5 • Retornos e Ajustes
-  const handleAddReturn = async (retData: Omit<WarrantyReturnRecord, 'id'>) => {
-    if (!session) return;
+  const handleAddReturn = async (
+    retData: Omit<WarrantyReturnRecord, 'id'>
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return false;
     try {
-      const code = getNextReturnId(db);
-      const ord = db.orders.find((o) => o.id === retData.orderId);
+      const snap = dbRef.current;
+      const code = getNextReturnId(snap);
+      const ord = snap.orders.find((o) => o.id === retData.orderId);
       const created = await dbCreateReturn(empresaId, code, retData, ord?.dbUuid);
       setDb((prev) => ({
         ...prev,
@@ -870,14 +1068,17 @@ export const App: React.FC = () => {
       }));
       scheduleAutoBackup();
       showToast(`Retorno de garantia (${retData.orderId}) registrado!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao registrar retorno.', 'err');
+      return false;
     }
   };
 
   const handleUpdateReturnStatus = async (id: string, nextStatus: ReturnStatus) => {
-    if (!session) return;
-    const target = db.returns.find((r) => r.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
+    const target = dbRef.current.returns.find((r) => r.id === id);
     if (!target?.dbUuid) return;
     try {
       await dbUpdateReturnStatus(empresaId, target.dbUuid, nextStatus);
@@ -896,8 +1097,9 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteReturn = async (returnId: string) => {
-    if (!session) return;
-    const target = db.returns.find((r) => r.id === returnId);
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
+    const target = dbRef.current.returns.find((r) => r.id === returnId);
     if (!target?.dbUuid) return;
     try {
       await dbSoftDeleteReturn(empresaId, target.dbUuid);
@@ -916,9 +1118,10 @@ export const App: React.FC = () => {
   const handleAddStockItem = async (
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
   ) => {
-    if (!session || session.role !== 'admin') return;
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
     try {
-      const code = getNextStockId(db);
+      const code = getNextStockId(dbRef.current);
       const created = await dbCreateStockItem(empresaId, code, payload);
       setDb((prev) => ({
         ...prev,
@@ -935,8 +1138,9 @@ export const App: React.FC = () => {
     id: string,
     payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
   ) => {
-    if (!session || session.role !== 'admin') return;
-    const target = (db.stock || []).find((item) => item.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const target = (dbRef.current.stock || []).find((item) => item.id === id);
     if (!target?.dbUuid) return;
     try {
       const updated = await dbUpdateStockItem(empresaId, target.dbUuid, payload);
@@ -954,8 +1158,9 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteStockItem = async (id: string) => {
-    if (!session || session.role !== 'admin') return;
-    const target = (db.stock || []).find((item) => item.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const target = (dbRef.current.stock || []).find((item) => item.id === id);
     if (!target?.dbUuid) return;
     try {
       await dbSoftDeleteStockItem(empresaId, target.dbUuid);
@@ -971,7 +1176,8 @@ export const App: React.FC = () => {
   };
 
   const handleRevertStockMovement = async (movement: StockMovementRecord) => {
-    if (!session || session.role === 'cliente') return;
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
     const currentItem = (dbRef.current.stock || []).find(
       (i) => i.dbUuid === movement.stockItemUuid
     );
@@ -985,7 +1191,7 @@ export const App: React.FC = () => {
           empresaId,
           movement,
           currentItem,
-          session.ownerName
+          active.ownerName
         );
       setDb((prev) => ({
         ...prev,
@@ -1013,13 +1219,14 @@ export const App: React.FC = () => {
     quantity: number,
     note?: string
   ) => {
-    if (!session || session.role === 'cliente') return;
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
     try {
       const { updatedItem, movement } = await dbRegisterStockMovement(
         empresaId,
         item,
         -Math.abs(quantity),
-        session.ownerName,
+        active.ownerName,
         note
       );
       setDb((prev) => ({
@@ -1051,13 +1258,14 @@ export const App: React.FC = () => {
     quantity: number,
     note?: string
   ) => {
-    if (!session || session.role !== 'admin') return;
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
     try {
       const { updatedItem, movement } = await dbRegisterStockMovement(
         empresaId,
         item,
         Math.abs(quantity),
-        session.ownerName,
+        active.ownerName,
         note
       );
       setDb((prev) => ({
@@ -1088,6 +1296,10 @@ export const App: React.FC = () => {
   const handleCreateExpense = async (
     payload: ExpenseDraftPayload
   ): Promise<ExpenseRecord> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
+      throw new Error('Apenas administradores podem cadastrar despesas.');
+    }
     const created = await dbCreateExpense(empresaId, payload);
     setDb((prev) => ({
       ...prev,
@@ -1102,6 +1314,10 @@ export const App: React.FC = () => {
     id: string,
     payload: ExpenseDraftPayload
   ): Promise<ExpenseRecord> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
+      throw new Error('Apenas administradores podem editar despesas.');
+    }
     const updated = await dbUpdateExpense(empresaId, id, payload);
     setDb((prev) => ({
       ...prev,
@@ -1113,6 +1329,10 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteExpense = async (id: string): Promise<void> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
+      throw new Error('Apenas administradores podem excluir despesas.');
+    }
     await dbSoftDeleteExpense(empresaId, id);
     setDb((prev) => ({
       ...prev,
@@ -1125,31 +1345,37 @@ export const App: React.FC = () => {
   // Finanças -> Prestadores, Folha, Investimentos
   const handleAddProvider = async (
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
     try {
-      const code = getNextProviderId(db);
-      const created = await dbCreateProvider(empresaId, code, payload);
+      const code = getNextProviderId(dbRef.current);
+      const created = await dbCreateProvider(targetEmpresaId, code, payload);
       setDb((prev) => ({
         ...prev,
         serviceProviders: [created, ...(prev.serviceProviders || [])],
       }));
       scheduleAutoBackup();
       showToast(`Prestador "${created.name}" cadastrado!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao cadastrar prestador.', 'err');
+      return false;
     }
   };
 
   const handleUpdateProvider = async (
     id: string,
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.serviceProviders || []).find((p) => p.id === id);
-    if (!target?.dbUuid) return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.serviceProviders || []).find((p) => p.id === id);
+    if (!target?.dbUuid) return false;
     try {
-      const updated = await dbUpdateProvider(empresaId, target.dbUuid, payload);
+      const updated = await dbUpdateProvider(targetEmpresaId, target.dbUuid, payload);
       setDb((prev) => ({
         ...prev,
         serviceProviders: (prev.serviceProviders || []).map((p) =>
@@ -1158,17 +1384,21 @@ export const App: React.FC = () => {
       }));
       scheduleAutoBackup();
       showToast('Prestador atualizado!');
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao atualizar prestador.', 'err');
+      return false;
     }
   };
 
   const handleDeleteProvider = async (id: string) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.serviceProviders || []).find((p) => p.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.serviceProviders || []).find((p) => p.id === id);
     if (!target?.dbUuid) return;
     try {
-      await dbSoftDeleteProvider(empresaId, target.dbUuid);
+      await dbSoftDeleteProvider(targetEmpresaId, target.dbUuid);
       setDb((prev) => ({
         ...prev,
         serviceProviders: (prev.serviceProviders || []).filter((p) => p.id !== id),
@@ -1182,32 +1412,38 @@ export const App: React.FC = () => {
 
   const handleAddPayrollEmployee = async (
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
     try {
-      const code = getNextPayrollEmployeeId(db);
-      const created = await dbCreatePayrollEmployee(empresaId, code, payload);
+      const code = getNextPayrollEmployeeId(dbRef.current);
+      const created = await dbCreatePayrollEmployee(targetEmpresaId, code, payload);
       setDb((prev) => ({
         ...prev,
         payrollEmployees: [created, ...(prev.payrollEmployees || [])],
       }));
       scheduleAutoBackup();
       showToast(`Funcionário "${created.name}" cadastrado!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao cadastrar funcionário.', 'err');
+      return false;
     }
   };
 
   const handleUpdatePayrollEmployee = async (
     id: string,
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.payrollEmployees || []).find((e) => e.id === id);
-    if (!target?.dbUuid) return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.payrollEmployees || []).find((e) => e.id === id);
+    if (!target?.dbUuid) return false;
     try {
       const updated = await dbUpdatePayrollEmployee(
-        empresaId,
+        targetEmpresaId,
         target.dbUuid,
         payload
       );
@@ -1219,17 +1455,21 @@ export const App: React.FC = () => {
       }));
       scheduleAutoBackup();
       showToast('Funcionário atualizado!');
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao atualizar funcionário.', 'err');
+      return false;
     }
   };
 
   const handleDeletePayrollEmployee = async (id: string) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.payrollEmployees || []).find((e) => e.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.payrollEmployees || []).find((e) => e.id === id);
     if (!target?.dbUuid) return;
     try {
-      await dbSoftDeletePayrollEmployee(empresaId, target.dbUuid);
+      await dbSoftDeletePayrollEmployee(targetEmpresaId, target.dbUuid);
       setDb((prev) => ({
         ...prev,
         payrollEmployees: (prev.payrollEmployees || []).filter(
@@ -1245,31 +1485,37 @@ export const App: React.FC = () => {
 
   const handleAddInvestment = async (
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
     try {
-      const code = getNextInvestmentId(db);
-      const created = await dbCreateInvestment(empresaId, code, payload);
+      const code = getNextInvestmentId(dbRef.current);
+      const created = await dbCreateInvestment(targetEmpresaId, code, payload);
       setDb((prev) => ({
         ...prev,
         investments: [created, ...(prev.investments || [])],
       }));
       scheduleAutoBackup();
       showToast(`Investimento "${created.assetName}" adicionado!`);
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao adicionar investimento.', 'err');
+      return false;
     }
   };
 
   const handleUpdateInvestment = async (
     id: string,
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.investments || []).find((inv) => inv.id === id);
-    if (!target?.dbUuid) return;
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.investments || []).find((inv) => inv.id === id);
+    if (!target?.dbUuid) return false;
     try {
-      const updated = await dbUpdateInvestment(empresaId, target.dbUuid, payload);
+      const updated = await dbUpdateInvestment(targetEmpresaId, target.dbUuid, payload);
       setDb((prev) => ({
         ...prev,
         investments: (prev.investments || []).map((inv) =>
@@ -1278,17 +1524,21 @@ export const App: React.FC = () => {
       }));
       scheduleAutoBackup();
       showToast('Investimento atualizado!');
+      return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao atualizar investimento.', 'err');
+      return false;
     }
   };
 
   const handleDeleteInvestment = async (id: string) => {
-    if (session?.role !== 'admin') return;
-    const target = (db.investments || []).find((inv) => inv.id === id);
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const target = (dbRef.current.investments || []).find((inv) => inv.id === id);
     if (!target?.dbUuid) return;
     try {
-      await dbSoftDeleteInvestment(empresaId, target.dbUuid);
+      await dbSoftDeleteInvestment(targetEmpresaId, target.dbUuid);
       setDb((prev) => ({
         ...prev,
         investments: (prev.investments || []).filter((inv) => inv.id !== id),
@@ -1307,11 +1557,12 @@ export const App: React.FC = () => {
     payload: Omit<NoteRecord, 'id' | 'company_id' | 'criadoPor' | 'criadoEm'>,
     editingId?: string
   ): Promise<NoteRecord | null> => {
-    if (!session || session.role === 'cliente') return null;
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return null;
     try {
       const saved = await dbSaveNote(
         empresaId,
-        session.ownerName,
+        active.ownerName,
         payload,
         editingId
       );
@@ -1340,7 +1591,8 @@ export const App: React.FC = () => {
   };
 
   const handleMarkNotePrinted = async (id: string) => {
-    if (!session || session.role === 'cliente') return;
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
     try {
       await dbUpdateNoteStatus(empresaId, id, 'impressa');
       setDb((prev) => ({
@@ -1355,7 +1607,8 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteNote = async (id: string) => {
-    if (!session || session.role === 'cliente') return;
+    const active = sessionRef.current;
+    if (!active || active.role === 'cliente') return;
     try {
       await dbSoftDeleteNote(empresaId, id);
       setDb((prev) => ({
@@ -1369,15 +1622,18 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleTriggerPrint = (
-    note: NoteRecord,
-    emitter: PedidoEmitterProfile
-  ) => {
-    setPrintJob({ note, emitter });
-    window.setTimeout(() => {
-      window.print();
-    }, 120);
-  };
+  const handleTriggerPrint = useCallback(
+    (note: NoteRecord, emitter: PedidoEmitterProfile) => {
+      setPrintJob({ note, emitter });
+      if (printTimerRef.current) {
+        window.clearTimeout(printTimerRef.current);
+      }
+      printTimerRef.current = window.setTimeout(() => {
+        window.print();
+      }, 120);
+    },
+    []
+  );
 
   // Equipe (Edge Function manage-team - sem service_role no frontend)
   const handleAddEmployee = async (payload: {
@@ -1387,7 +1643,8 @@ export const App: React.FC = () => {
     role: UserRole;
     jobTitle: string;
   }): Promise<{ error?: string }> => {
-    if (!session || session.role !== 'admin') {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
       return { error: 'Apenas administradores podem adicionar membros.' };
     }
     try {
@@ -1395,7 +1652,7 @@ export const App: React.FC = () => {
         action: 'create_member',
         ...payload,
       });
-      await hydrateFromSupabase(session);
+      await hydrateFromSupabase(active);
       showToast(`Funcionário "${payload.ownerName}" cadastrado no Supabase!`);
       return {};
     } catch (err: any) {
@@ -1407,7 +1664,8 @@ export const App: React.FC = () => {
     memberId: string,
     nextRole: UserRole
   ) => {
-    if (!session || session.role !== 'admin') return;
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
     try {
       await invokeManageTeam({
         action: 'update_role',
@@ -1431,7 +1689,8 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteEmployee = async (memberId: string) => {
-    if (!session || session.role !== 'admin') return;
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return;
     try {
       await invokeManageTeam({
         action: 'remove_member',
@@ -1447,21 +1706,35 @@ export const App: React.FC = () => {
     }
   };
 
-  const unDismissedAlerts = settingsState.logs.filter(
-    (l) => l.status === 'erro' && !l.alerta_dispensado
+  const unDismissedAlerts = useMemo(
+    () => settingsState.logs.filter((l) => l.status === 'erro' && !l.alerta_dispensado),
+    [settingsState.logs]
   );
 
-  const counts = {
-    companies: db.companies.length,
-    inProduction: db.orders.filter((o) => o.stage !== 'faca_pronta').length,
-    overdue: financials.overdueCount,
-    deliveries: db.deliveries.length,
-    openReturns: db.returns.filter((r) => r.status !== 'liberado').length,
-    stock: (db.stock || []).length,
-    notas: (db.notas || []).length,
-    employees: (db.employees || []).length,
-    backupAlerts: unDismissedAlerts.length,
-  };
+  const counts = useMemo(
+    () => ({
+      companies: db.companies.length,
+      inProduction: db.orders.filter((o) => o.stage !== 'faca_pronta').length,
+      overdue: financials.overdueCount,
+      deliveries: db.deliveries.length,
+      openReturns: db.returns.filter((r) => r.status !== 'liberado').length,
+      stock: (db.stock || []).length,
+      notas: (db.notas || []).length,
+      employees: (db.employees || []).length,
+      backupAlerts: unDismissedAlerts.length,
+    }),
+    [
+      db.companies.length,
+      db.orders,
+      financials.overdueCount,
+      db.deliveries.length,
+      db.returns,
+      db.stock,
+      db.notas,
+      db.employees,
+      unDismissedAlerts.length,
+    ]
+  );
 
   if (authChecking) {
     return (
@@ -1488,6 +1761,31 @@ export const App: React.FC = () => {
         <div className="blob blob-5" />
         <div className="relative z-10">
           <AuthLoginScreen onAuthenticated={handleAuthenticated} />
+        </div>
+      </div>
+    );
+  }
+
+  if (session.role === 'cliente') {
+    return (
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center p-6 text-slate-800 relative">
+        <div className="blob blob-1" />
+        <div className="blob blob-2" />
+        <div className="liquid-glass rounded-[28px] max-w-md w-full p-8 text-center space-y-4 relative z-10 shadow-xl">
+          <AlertTriangle className="w-8 h-8 text-amber-600 mx-auto" />
+          <h2 className="text-lg font-extrabold text-slate-900">
+            Acesso Restrito ao Painel Interno
+          </h2>
+          <p className="text-xs font-medium text-slate-600 leading-relaxed">
+            Seu usuário possui perfil <strong>Cliente</strong>. Solicite ao administrador da facaria a liberação para Operador ou Administrador caso precise acessar a esteira.
+          </p>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="min-h-[44px] px-6 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md transition cursor-pointer"
+          >
+            Sair da conta
+          </button>
         </div>
       </div>
     );
@@ -1599,8 +1897,8 @@ export const App: React.FC = () => {
 
               {session.role === 'admin' && effectiveSection === 'bento_home' && (
                 <BentoOverviewSection
-                  companies={filteredCompanies}
-                  orders={filteredOrders}
+                  companies={db.companies}
+                  orders={db.orders}
                   deliveries={db.deliveries}
                   returns={db.returns}
                   stock={db.stock || []}
@@ -1614,7 +1912,7 @@ export const App: React.FC = () => {
               {session.role === 'admin' && effectiveSection === 'empresas' && (
                 <CompaniesCrmSection
                   companies={filteredCompanies}
-                  orders={filteredOrders}
+                  orders={db.orders}
                   selectedCompanyId={selectedCompanyId}
                   onSelectCompany={setSelectedCompanyId}
                   onAddCompany={handleAddCompany}
@@ -1637,14 +1935,12 @@ export const App: React.FC = () => {
               {effectiveSection === 'esteira' && (
                 <ProductionKanban
                   orders={filteredOrders}
+                  userRole={session.role}
                   pendingOrderIds={pendingOrderIds}
                   moveError={moveError}
                   onMoveStage={handleMoveStage}
                   onDeleteOrder={handleDeleteOrder}
-                  onQuickRegisterDelivery={(order) => {
-                    setPrefillDeliveryOrder(order);
-                    handleSelectSection('entregas');
-                  }}
+                  onQuickRegisterDelivery={handleQuickRegisterDelivery}
                 />
               )}
 
@@ -1710,7 +2006,7 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {effectiveSection === 'notas' && session.role !== 'cliente' && (
+              {effectiveSection === 'notas' && (
                 <NotesSection
                   notas={db.notas || []}
                   companies={db.companies}

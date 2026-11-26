@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   BarChart3,
@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   FileWarning,
+  Loader2,
   MessageCircle,
   PieChart,
   Receipt,
@@ -53,36 +54,36 @@ interface FinanceAnalyticsSectionProps {
   serviceProviders: ServiceProviderRecord[];
   payrollEmployees: PayrollEmployeeRecord[];
   investments: InvestmentRecord[];
-  onTogglePaid: (orderId: string) => void;
-  onEmitBilling30d: (orderId: string) => void;
-  onDeleteOrder: (orderId: string) => void;
+  onTogglePaid: (orderId: string) => Promise<void> | void;
+  onEmitBilling30d: (orderId: string) => Promise<void> | void;
+  onDeleteOrder: (orderId: string) => Promise<void> | void;
   onCreateExpense: (payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
   onUpdateExpense: (id: string, payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
   onDeleteExpense: (id: string) => Promise<void>;
   onAddProvider: (
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdateProvider: (
     id: string,
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeleteProvider: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeleteProvider: (id: string) => Promise<void> | void;
   onAddPayrollEmployee: (
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdatePayrollEmployee: (
     id: string,
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeletePayrollEmployee: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeletePayrollEmployee: (id: string) => Promise<void> | void;
   onAddInvestment: (
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
+  ) => Promise<boolean | void> | void;
   onUpdateInvestment: (
     id: string,
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
-  ) => void;
-  onDeleteInvestment: (id: string) => void;
+  ) => Promise<boolean | void> | void;
+  onDeleteInvestment: (id: string) => Promise<void> | void;
 }
 
 export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = ({
@@ -113,11 +114,21 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'todos'>('todos');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [hoveredModality, setHoveredModality] = useState<string | null>(null);
+  const [busyOrderAction, setBusyOrderAction] = useState<string | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
 
-  const filteredOrders = orders.filter((o) => {
-    if (statusFilter === 'todos') return true;
-    return o.paymentStatus === statusFilter;
-  });
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
+
+  const filteredOrders = useMemo(() => {
+    if (statusFilter === 'todos') return orders;
+    return orders.filter((o) => o.paymentStatus === statusFilter);
+  }, [orders, statusFilter]);
 
   const handleCopyPix = async (order: DieOrder) => {
     const text = buildPixClipboardSnippet(order);
@@ -132,28 +143,41 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
       document.body.removeChild(ta);
     }
     setCopiedId(order.id);
-    setTimeout(() => {
+    if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => {
       setCopiedId((prev) => (prev === order.id ? null : prev));
     }, 2200);
   };
 
+  const runOrderAction = async (key: string, fn: () => Promise<void> | void) => {
+    if (busyOrderAction) return;
+    setBusyOrderAction(key);
+    try {
+      await fn();
+    } finally {
+      setBusyOrderAction(null);
+    }
+  };
+
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
-  let cumulativePercent = 0;
 
-  const donutSegments = financials.byModality
-    .filter((m) => m.totalAmount > 0)
-    .map((m) => {
-      const frac = financials.totalVolume > 0 ? m.totalAmount / financials.totalVolume : 0;
-      const strokeDasharray = `${frac * circumference} ${circumference}`;
-      const strokeDashoffset = -cumulativePercent * circumference;
-      cumulativePercent += frac;
-      return {
-        ...m,
-        strokeDasharray,
-        strokeDashoffset,
-      };
-    });
+  const donutSegments = useMemo(() => {
+    let cumulativePercent = 0;
+    return financials.byModality
+      .filter((m) => m.totalAmount > 0)
+      .map((m) => {
+        const frac = financials.totalVolume > 0 ? m.totalAmount / financials.totalVolume : 0;
+        const strokeDasharray = `${frac * circumference} ${circumference}`;
+        const strokeDashoffset = -cumulativePercent * circumference;
+        cumulativePercent += frac;
+        return {
+          ...m,
+          strokeDasharray,
+          strokeDashoffset,
+        };
+      });
+  }, [financials, circumference]);
 
   return (
     <div className="space-y-5 min-w-0">
@@ -581,24 +605,40 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                         {order.paymentStatus === 'sem_nota' && (
                           <button
                             type="button"
-                            onClick={() => onEmitBilling30d(order.id)}
-                            className="min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold bg-amber-500 text-white inline-flex items-center gap-1 cursor-pointer"
+                            disabled={Boolean(busyOrderAction)}
+                            onClick={() =>
+                              void runOrderAction(`bill:${order.id}`, () =>
+                                onEmitBilling30d(order.id)
+                              )
+                            }
+                            className="min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold bg-amber-500 disabled:opacity-60 text-white inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <Sparkles className="w-4 h-4" />
+                            {busyOrderAction === `bill:${order.id}` ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="w-4 h-4" />
+                            )}
                             <span>Gerar 30d</span>
                           </button>
                         )}
 
                         <button
                           type="button"
-                          onClick={() => onTogglePaid(order.id)}
-                          className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
+                          disabled={Boolean(busyOrderAction)}
+                          onClick={() =>
+                            void runOrderAction(`paid:${order.id}`, () =>
+                              onTogglePaid(order.id)
+                            )
+                          }
+                          className={`min-h-[44px] px-3.5 py-2 rounded-full text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60 cursor-pointer ${
                             order.paymentStatus === 'pago'
                               ? 'liquid-glass-pill text-slate-700'
                               : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
                           }`}
                         >
-                          {order.paymentStatus === 'pago' ? (
+                          {busyOrderAction === `paid:${order.id}` ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : order.paymentStatus === 'pago' ? (
                             <>
                               <RotateCcw className="w-4 h-4" />
                               <span>Reabrir</span>
@@ -613,11 +653,20 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
 
                         <button
                           type="button"
-                          onClick={() => onDeleteOrder(order.id)}
+                          disabled={Boolean(busyOrderAction)}
+                          onClick={() =>
+                            void runOrderAction(`del:${order.id}`, () =>
+                              onDeleteOrder(order.id)
+                            )
+                          }
                           aria-label="Excluir esta OS"
-                          className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                          className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {busyOrderAction === `del:${order.id}` ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -748,24 +797,40 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                               {order.paymentStatus === 'sem_nota' && (
                                 <button
                                   type="button"
-                                  onClick={() => onEmitBilling30d(order.id)}
-                                  className="px-3 py-1.5 rounded-full text-xs font-bold bg-amber-500 hover:bg-amber-400 text-white shadow-sm flex items-center gap-1 transition cursor-pointer"
+                                  disabled={Boolean(busyOrderAction)}
+                                  onClick={() =>
+                                    void runOrderAction(`bill:${order.id}`, () =>
+                                      onEmitBilling30d(order.id)
+                                    )
+                                  }
+                                  className="px-3 py-1.5 rounded-full text-xs font-bold bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-white shadow-sm flex items-center gap-1 transition cursor-pointer"
                                 >
-                                  <Sparkles className="w-3.5 h-3.5" />
+                                  {busyOrderAction === `bill:${order.id}` ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                  )}
                                   <span>Gerar 30d</span>
                                 </button>
                               )}
 
                               <button
                                 type="button"
-                                onClick={() => onTogglePaid(order.id)}
-                                className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+                                disabled={Boolean(busyOrderAction)}
+                                onClick={() =>
+                                  void runOrderAction(`paid:${order.id}`, () =>
+                                    onTogglePaid(order.id)
+                                  )
+                                }
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 disabled:opacity-60 transition cursor-pointer ${
                                   order.paymentStatus === 'pago'
                                     ? 'liquid-glass-pill text-slate-700'
                                     : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
                                 }`}
                               >
-                                {order.paymentStatus === 'pago' ? (
+                                {busyOrderAction === `paid:${order.id}` ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : order.paymentStatus === 'pago' ? (
                                   <>
                                     <RotateCcw className="w-3 h-3" />
                                     <span>Reabrir</span>
@@ -780,12 +845,21 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
 
                               <button
                                 type="button"
-                                onClick={() => onDeleteOrder(order.id)}
-                                className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                                disabled={Boolean(busyOrderAction)}
+                                onClick={() =>
+                                  void runOrderAction(`del:${order.id}`, () =>
+                                    onDeleteOrder(order.id)
+                                  )
+                                }
+                                className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
                                 title="Excluir esta OS"
                                 aria-label="Excluir esta OS"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                {busyOrderAction === `del:${order.id}` ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
                               </button>
                             </div>
                           </td>

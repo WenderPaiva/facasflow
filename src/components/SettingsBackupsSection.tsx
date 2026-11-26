@@ -256,7 +256,6 @@ export const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
       });
       setPreviewOpen(false);
       await onRestored();
-      await onRefresh();
       setActionMsg({
         type: 'ok',
         text: 'Restauração concluída em transação! Um backup pré-restauração (90 dias) foi salvo automaticamente.',
@@ -294,6 +293,12 @@ export const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
         setImportOpen(true);
       }
     };
+    reader.onerror = () => {
+      setImportError('Erro ao ler o arquivo JSON do dispositivo.');
+      setImportFileName(file.name);
+      setImportSnapshot(null);
+      setImportOpen(true);
+    };
     reader.readAsText(file, 'utf-8');
   };
 
@@ -309,7 +314,6 @@ export const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
       });
       setImportOpen(false);
       await onRestored();
-      await onRefresh();
       setActionMsg({
         type: 'ok',
         text: 'Importação JSON aplicada com sucesso após snapshot pré-restauração.',
