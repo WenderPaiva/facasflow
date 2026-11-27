@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, Layers, Loader2, X } from 'lucide-react';
 import {
   Company,
+  DieOrder,
+  OrderUpsertPayload,
   PaymentModality,
   ProductionStage,
 } from '../types/order';
@@ -12,15 +14,12 @@ interface FastEntryModalProps {
   onClose: () => void;
   companies: Company[];
   nextOrderId: string;
-  onSaveOrder: (payload: {
-    companyId: string;
-    companyName: string;
-    companyPhone: string;
-    toolDescription: string;
-    amount: number;
-    paymentModality: PaymentModality;
-    stage: ProductionStage;
-  }) => Promise<boolean> | boolean;
+  editingOrder?: DieOrder | null;
+  onSaveOrder: (payload: OrderUpsertPayload) => Promise<boolean> | boolean;
+  onUpdateOrder?: (
+    orderId: string,
+    payload: OrderUpsertPayload
+  ) => Promise<boolean> | boolean;
 }
 
 export const FastEntryModal: React.FC<FastEntryModalProps> = ({
@@ -28,29 +27,83 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
   onClose,
   companies,
   nextOrderId,
+  editingOrder = null,
   onSaveOrder,
+  onUpdateOrder,
 }) => {
-  const [selectedCompanyId, setSelectedCompanyId] = useState(companies[0]?.id || '');
+  const isEditing = Boolean(editingOrder);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(companies[0]?.id || 'nova');
   const [customCompanyName, setCustomCompanyName] = useState('');
   const [toolDescription, setToolDescription] = useState('');
+  const [bladeMeters, setBladeMeters] = useState('');
+  const [woodMm, setWoodMm] = useState<'' | 15 | 18 | 22>('');
+  const [dueDate, setDueDate] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentModality, setPaymentModality] = useState<PaymentModality>('boleto');
   const [stage, setStage] = useState<ProductionStage>('arquivo_recebido');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const wasOpenRef = useRef(false);
+  const prevEditingKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && !wasOpenRef.current) {
-      setSelectedCompanyId(companies[0]?.id || 'nova');
-      setCustomCompanyName('');
-      setToolDescription('');
-      setAmount('');
-      setPaymentModality('boleto');
-      setStage('arquivo_recebido');
+    const editingKey = editingOrder ? `${editingOrder.id}:${editingOrder.updatedAt || ''}` : null;
+    const justOpened = isOpen && !wasOpenRef.current;
+    const editingChanged = isOpen && prevEditingKeyRef.current !== editingKey;
+
+    if (justOpened || editingChanged) {
+      if (editingOrder) {
+        const matchedCompany = companies.find(
+          (c) =>
+            (editingOrder.companyUuid && c.dbUuid === editingOrder.companyUuid) ||
+            (editingOrder.companyId && c.id === editingOrder.companyId) ||
+            c.corporateName.trim().toLowerCase() ===
+              (editingOrder.companyName || '').trim().toLowerCase()
+        );
+        if (matchedCompany) {
+          setSelectedCompanyId(matchedCompany.id);
+          setCustomCompanyName('');
+        } else {
+          setSelectedCompanyId('nova');
+          setCustomCompanyName(editingOrder.companyName || '');
+        }
+        setToolDescription(editingOrder.toolDescription || '');
+        setBladeMeters(
+          editingOrder.bladeMeters !== undefined && editingOrder.bladeMeters !== null
+            ? String(editingOrder.bladeMeters)
+            : ''
+        );
+        setWoodMm(
+          editingOrder.woodMm === 15 ||
+            editingOrder.woodMm === 18 ||
+            editingOrder.woodMm === 22
+            ? editingOrder.woodMm
+            : ''
+        );
+        setDueDate(editingOrder.dueDate ? editingOrder.dueDate.slice(0, 10) : '');
+        setAmount(
+          editingOrder.amount !== undefined && editingOrder.amount !== null
+            ? String(editingOrder.amount)
+            : ''
+        );
+        setPaymentModality(editingOrder.paymentModality || 'boleto');
+        setStage(editingOrder.stage || 'arquivo_recebido');
+      } else {
+        setSelectedCompanyId(companies[0]?.id || 'nova');
+        setCustomCompanyName('');
+        setToolDescription('');
+        setBladeMeters('');
+        setWoodMm('');
+        setDueDate('');
+        setAmount('');
+        setPaymentModality('boleto');
+        setStage('arquivo_recebido');
+      }
       setIsSubmitting(false);
     }
+
     wasOpenRef.current = isOpen;
-  }, [isOpen, companies]);
+    prevEditingKeyRef.current = isOpen ? editingKey : null;
+  }, [isOpen, editingOrder, companies]);
 
   if (!isOpen) return null;
 
@@ -59,24 +112,55 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
     if (isSubmitting || !toolDescription.trim()) return;
 
     const existingComp = companies.find((c) => c.id === selectedCompanyId);
+    const sameAdHocName =
+      Boolean(editingOrder) &&
+      customCompanyName.trim().toLowerCase() ===
+        (editingOrder?.companyName || '').trim().toLowerCase();
+
     const companyName =
       selectedCompanyId === 'nova'
-        ? customCompanyName.trim() || 'Cliente Avulso'
-        : existingComp?.corporateName || 'Cliente';
-    const companyPhone = existingComp?.phone || '(11) 99999-0000';
+        ? customCompanyName.trim() || editingOrder?.companyName || 'Cliente Avulso'
+        : existingComp?.corporateName || editingOrder?.companyName || 'Cliente';
+
+    const companyId =
+      existingComp?.id ||
+      (sameAdHocName && editingOrder?.companyId ? editingOrder.companyId : '__new__');
+
+    const companyPhone =
+      existingComp?.phone ||
+      (sameAdHocName && editingOrder?.companyPhone
+        ? editingOrder.companyPhone
+        : '(11) 99999-0000');
+
     const numericAmount = parseFloat(amount.replace(',', '.')) || 0;
+    const parsedBladeMeters = bladeMeters.trim()
+      ? parseFloat(bladeMeters.replace(',', '.'))
+      : null;
+
+    const payload: OrderUpsertPayload = {
+      companyId,
+      companyName,
+      companyPhone,
+      toolDescription: toolDescription.trim(),
+      bladeMeters:
+        parsedBladeMeters !== null &&
+        Number.isFinite(parsedBladeMeters) &&
+        parsedBladeMeters >= 0
+          ? parsedBladeMeters
+          : null,
+      woodMm: woodMm === 15 || woodMm === 18 || woodMm === 22 ? woodMm : null,
+      dueDate: dueDate.trim() || undefined,
+      amount: numericAmount,
+      paymentModality,
+      stage,
+    };
 
     setIsSubmitting(true);
     try {
-      const ok = await onSaveOrder({
-        companyId: existingComp?.id || '__new__',
-        companyName,
-        companyPhone,
-        toolDescription: toolDescription.trim(),
-        amount: numericAmount,
-        paymentModality,
-        stage,
-      });
+      const ok =
+        editingOrder && onUpdateOrder
+          ? await onUpdateOrder(editingOrder.id, payload)
+          : await onSaveOrder(payload);
       if (ok !== false) {
         onClose();
       }
@@ -88,12 +172,16 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
   const inputClass =
     'liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition';
 
+  const modalTitle = editingOrder
+    ? `Editar Faca ${editingOrder.id}`
+    : 'Nova Ordem de Serviço';
+
   return (
     <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-slate-900/35 backdrop-blur-md p-0 md:p-4">
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Nova Ordem de Serviço"
+        aria-label={modalTitle}
         className="w-full md:max-w-lg max-h-[92dvh] rounded-t-[28px] md:rounded-[30px] liquid-glass bg-white/70 shadow-2xl flex flex-col overflow-hidden"
       >
         {/* Header */}
@@ -107,14 +195,18 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-extrabold text-slate-900">
-                  Nova Ordem de Serviço
+                  {modalTitle}
                 </h2>
-                <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
-                  {nextOrderId}
-                </span>
+                {!editingOrder && (
+                  <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
+                    {nextOrderId}
+                  </span>
+                )}
               </div>
               <p className="text-[11px] font-medium text-slate-600 truncate">
-                Lançamento rápido • Entra direto na Esteira e no Financeiro
+                {isEditing
+                  ? 'Edição completa • Atualiza Esteira, Especificações e Financeiro'
+                  : 'Lançamento rápido • Entra direto na Esteira e no Financeiro'}
               </p>
             </div>
           </div>
@@ -177,6 +269,59 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
               />
             </div>
 
+            {/* 2b. Especificações & Prazo */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Lam. (m)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={bladeMeters}
+                  onChange={(e) => setBladeMeters(e.target.value)}
+                  placeholder="Ex: 12.5"
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Madeira (mm)
+                </label>
+                <select
+                  value={woodMm}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setWoodMm(
+                      val === '15' || val === '18' || val === '22'
+                        ? (Number(val) as 15 | 18 | 22)
+                        : ''
+                    );
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">Não informar</option>
+                  <option value="15">15 mm</option>
+                  <option value="18">18 mm</option>
+                  <option value="22">22 mm</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Prazo / Vencimento
+                </label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
+            </div>
+
             {/* 3. Valor & Status Inicial de Produção */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -197,7 +342,7 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
 
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
-                  4. Status Inicial na Esteira
+                  4. Status na Esteira
                 </label>
                 <select
                   value={stage}
@@ -239,9 +384,11 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
                   );
                 })}
               </div>
-              <p className="text-[11px] font-medium text-slate-600 mt-1.5">
-                Toda OS entra automaticamente com status <strong>Não Pago</strong> até confirmação manual em &quot;Marcar como pago&quot;.
-              </p>
+              {!isEditing && (
+                <p className="text-[11px] font-medium text-slate-600 mt-1.5">
+                  Toda OS entra automaticamente com status <strong>Não Pago</strong> até confirmação manual em &quot;Marcar como pago&quot;.
+                </p>
+              )}
             </div>
           </div>
 
@@ -254,12 +401,18 @@ export const FastEntryModal: React.FC<FastEntryModalProps> = ({
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Registrando na Esteira...</span>
+                  <span>
+                    {isEditing ? 'Salvando Alterações...' : 'Criando na Esteira...'}
+                  </span>
                 </>
               ) : (
                 <>
                   <Check className="w-4 h-4 stroke-[2.5]" />
-                  <span>Registrar {nextOrderId} na Esteira</span>
+                  <span>
+                    {isEditing
+                      ? 'Salvar Alterações'
+                      : `Criar ${nextOrderId} na Esteira`}
+                  </span>
                 </>
               )}
             </button>

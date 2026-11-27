@@ -13,10 +13,12 @@ import {
   NoteItem,
   NoteRecord,
   PaymentModality,
+  PaymentStatus,
   PayrollEmployeeRecord,
   ProductionStage,
   ReturnStatus,
   ServiceProviderRecord,
+  StageLog,
   StockCategory,
   StockItem,
   StockMovementRecord,
@@ -27,6 +29,7 @@ import {
 } from '../types/order';
 import {
   addDays,
+  normalizeExpenseCategory,
   normalizeInvestmentType,
   PAYMENT_MODALITY_META,
   roundCurrencyBRL,
@@ -45,6 +48,122 @@ function fromExpensePayment(pm: string): PaymentModality {
     return pm;
   }
   return 'pix';
+}
+
+function toStockInt(value: unknown): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.round(num));
+}
+
+function mapOrderRow(o: any): DieOrder {
+  const createdDate = String(o.created_at || toISODate()).slice(0, 10);
+  const woodNum = o.wood_mm != null ? Number(o.wood_mm) : undefined;
+  return {
+    id: o.numero_os,
+    dbUuid: o.id,
+    company_id: o.empresa_id,
+    companyId: o.cliente_codigo_legado || o.cliente_empresa_id || '',
+    companyUuid: o.cliente_empresa_id || undefined,
+    companyName: o.cliente_nome,
+    companyPhone: o.cliente_telefone || '',
+    toolDescription: o.descricao_ferramenta,
+    bladeMeters: o.blade_meters != null ? Number(o.blade_meters) : undefined,
+    woodMm:
+      woodNum === 15 || woodNum === 18 || woodNum === 22 ? woodNum : undefined,
+    amount: Number(o.valor) || 0,
+    paymentModality: o.forma_pagamento as PaymentModality,
+    paymentStatus: o.status_pagamento as PaymentStatus,
+    stage: o.etapa as ProductionStage,
+    stageUpdatedAt: o.etapa_atualizada_em || '',
+    stageHistory: Array.isArray(o.historico_etapas) ? o.historico_etapas : [],
+    version: Number(o.version) || 1,
+    updatedAt: o.updated_at || o.created_at,
+    createdAt: createdDate,
+    dueDate: String(o.data_vencimento || createdDate).slice(0, 10),
+    paidAt: o.data_pagamento ? String(o.data_pagamento).slice(0, 10) : undefined,
+    financialNotes: o.observacao_financeira || undefined,
+  };
+}
+
+function mapExpenseRow(d: any): ExpenseRecord {
+  return {
+    ...d,
+    categoria: normalizeExpenseCategory(d.categoria),
+    descricao: d.descricao || '',
+    valor: roundCurrencyBRL(Number(d.valor) || 0),
+    data_competencia: String(d.data_competencia || '').slice(0, 10),
+    data_vencimento: d.data_vencimento ? String(d.data_vencimento).slice(0, 10) : undefined,
+    data_pagamento: d.data_pagamento ? String(d.data_pagamento).slice(0, 10) : undefined,
+    fornecedor: d.fornecedor || undefined,
+    observacao: d.observacao || undefined,
+    origem_tipo:
+      d.origem_tipo === 'funcionario' || d.origem_tipo === 'prestador'
+        ? d.origem_tipo
+        : null,
+    origem_id: d.origem_id || null,
+    competencia_referencia: d.competencia_referencia || null,
+  };
+}
+
+function mapProviderRow(p: any): ServiceProviderRecord {
+  const dueDate = String(p.data_vencimento || toISODate()).slice(0, 10);
+  const parsedDay = Number(p.dia_pagamento);
+  const derivedDay =
+    Number.isInteger(parsedDay) && parsedDay >= 1 && parsedDay <= 31
+      ? parsedDay
+      : Number(dueDate.slice(8, 10)) || 5;
+  return {
+    id: p.codigo_legado || p.id,
+    dbUuid: p.id,
+    company_id: p.empresa_id,
+    name: p.nome,
+    service: p.servico,
+    amount: Number(p.valor) || 0,
+    paymentModality: fromExpensePayment(p.forma_pagamento),
+    dueDate,
+    paymentDay: derivedDay,
+    status: p.status,
+    updatedAt: String(p.updated_at || ''),
+  };
+}
+
+function mapPayrollEmployeeRow(e: any): PayrollEmployeeRecord {
+  const rawDay = Number(e.dia_pagamento);
+  const paymentDay =
+    Number.isInteger(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : 5;
+  return {
+    id: e.codigo_legado || e.id,
+    dbUuid: e.id,
+    company_id: e.empresa_id,
+    name: e.nome,
+    roleTitle: e.cargo,
+    salary: Number(e.salario) || 0,
+    admissionDate: String(e.data_admissao || toISODate()).slice(0, 10),
+    paymentDay,
+    paymentStatus: e.status_pagamento === 'pago' ? 'pago' : 'pendente',
+    paymentModality: fromExpensePayment(e.forma_pagamento || 'pix'),
+    paidAt: e.data_pagamento ? String(e.data_pagamento).slice(0, 10) : undefined,
+    paidCompetence: e.competencia_paga || undefined,
+    updatedAt: String(e.updated_at || ''),
+  };
+}
+
+function mapStockItemRow(s: any): StockItem {
+  return {
+    id: s.codigo_legado || s.id,
+    dbUuid: s.id,
+    company_id: s.empresa_id,
+    category: s.categoria === 'laminas' ? 'laminas' : 'madeiras',
+    name: s.nome,
+    quantity: toStockInt(s.quantidade),
+    unit: s.unidade,
+    minStock: toStockInt(s.estoque_minimo),
+    supplier: s.fornecedor || 'Não informado',
+    unitCost: Number(s.custo_unitario) || 0,
+    entryDate: String(s.data_entrada || '').slice(0, 10),
+    updatedAt: String(s.updated_at || ''),
+  };
 }
 
 export function toFriendlySupabaseError(err: unknown, fallback: string): string {
@@ -421,29 +540,7 @@ export async function loadCompanyDatabaseFromSupabase(
     city: c.cidade || undefined,
   }));
 
-  const orders: DieOrder[] = (ordersRes.data || []).map((o: any) => ({
-    id: o.numero_os,
-    dbUuid: o.id,
-    company_id: o.empresa_id,
-    companyId: o.cliente_codigo_legado || o.cliente_empresa_id || '',
-    companyUuid: o.cliente_empresa_id || undefined,
-    companyName: o.cliente_nome,
-    companyPhone: o.cliente_telefone || '',
-    toolDescription: o.descricao_ferramenta,
-    bladeMeters: o.blade_meters != null ? Number(o.blade_meters) : undefined,
-    woodMm: o.wood_mm || undefined,
-    amount: Number(o.valor) || 0,
-    paymentModality: o.forma_pagamento as PaymentModality,
-    paymentStatus: o.status_pagamento,
-    stage: o.etapa as ProductionStage,
-    stageUpdatedAt: o.etapa_atualizada_em || '',
-    stageHistory: Array.isArray(o.historico_etapas) ? o.historico_etapas : [],
-    version: Number(o.version) || 1,
-    updatedAt: o.updated_at || o.created_at,
-    createdAt: String(o.created_at || '').slice(0, 10),
-    dueDate: String(o.data_vencimento || '').slice(0, 10),
-    paidAt: o.data_pagamento ? String(o.data_pagamento).slice(0, 10) : undefined,
-  }));
+  const orders: DieOrder[] = (ordersRes.data || []).map(mapOrderRow);
 
   const deliveries: DeliveryRecord[] = (deliveriesRes.data || []).map((d: any) => ({
     id: d.codigo_legado || d.id,
@@ -473,20 +570,7 @@ export async function loadCompanyDatabaseFromSupabase(
     updatedAt: String(r.updated_at || ''),
   }));
 
-  const stock: StockItem[] = (stockRes.data || []).map((s: any) => ({
-    id: s.codigo_legado || s.id,
-    dbUuid: s.id,
-    company_id: s.empresa_id,
-    category: s.categoria === 'laminas' ? 'laminas' : 'madeiras',
-    name: s.nome,
-    quantity: Number(s.quantidade) || 0,
-    unit: s.unidade,
-    minStock: Number(s.estoque_minimo) || 0,
-    supplier: s.fornecedor || 'Não informado',
-    unitCost: Number(s.custo_unitario) || 0,
-    entryDate: String(s.data_entrada || '').slice(0, 10),
-    updatedAt: String(s.updated_at || ''),
-  }));
+  const stock: StockItem[] = (stockRes.data || []).map(mapStockItemRow);
 
   const stockMovements: StockMovementRecord[] = (stockMovRes.data || []).map((m: any) => ({
     id: m.id,
@@ -497,9 +581,9 @@ export async function loadCompanyDatabaseFromSupabase(
     category: m.categoria === 'laminas' ? 'laminas' : 'madeiras',
     unit: m.unidade || 'un',
     type: m.tipo as StockMovementType,
-    quantity: Number(m.quantidade) || 0,
-    previousBalance: Number(m.saldo_anterior) || 0,
-    newBalance: Number(m.saldo_posterior) || 0,
+    quantity: Math.max(1, toStockInt(m.quantidade)),
+    previousBalance: toStockInt(m.saldo_anterior),
+    newBalance: toStockInt(m.saldo_posterior),
     actorName: m.responsavel_nome || 'Equipe',
     note: m.observacao || undefined,
     revertedAt: m.estornado_em || null,
@@ -540,52 +624,14 @@ export async function loadCompanyDatabaseFromSupabase(
     criadoEm: n.created_at || '',
   }));
 
-  const despesas: ExpenseRecord[] = (despesasRes.data || []).map((d: any) => ({
-    id: d.id,
-    empresa_id: d.empresa_id,
-    categoria: d.categoria,
-    descricao: d.descricao || '',
-    valor: roundCurrencyBRL(Number(d.valor) || 0),
-    data_competencia: String(d.data_competencia || '').slice(0, 10),
-    data_vencimento: d.data_vencimento ? String(d.data_vencimento).slice(0, 10) : undefined,
-    data_pagamento: d.data_pagamento ? String(d.data_pagamento).slice(0, 10) : undefined,
-    status: d.status,
-    forma_pagamento: d.forma_pagamento,
-    fornecedor: d.fornecedor || undefined,
-    observacao: d.observacao || undefined,
-    created_by: d.created_by,
-    updated_by: d.updated_by,
-    created_at: d.created_at,
-    updated_at: d.updated_at,
-    deleted_at: d.deleted_at,
-  }));
+  const despesas: ExpenseRecord[] = (despesasRes.data || []).map(mapExpenseRow);
 
   const serviceProviders: ServiceProviderRecord[] = (providersRes.data || []).map(
-    (p: any) => ({
-      id: p.codigo_legado || p.id,
-      dbUuid: p.id,
-      company_id: p.empresa_id,
-      name: p.nome,
-      service: p.servico,
-      amount: Number(p.valor) || 0,
-      paymentModality: fromExpensePayment(p.forma_pagamento),
-      dueDate: String(p.data_vencimento || '').slice(0, 10),
-      status: p.status,
-      updatedAt: String(p.updated_at || ''),
-    })
+    mapProviderRow
   );
 
   const payrollEmployees: PayrollEmployeeRecord[] = (payrollRes.data || []).map(
-    (e: any) => ({
-      id: e.codigo_legado || e.id,
-      dbUuid: e.id,
-      company_id: e.empresa_id,
-      name: e.nome,
-      roleTitle: e.cargo,
-      salary: Number(e.salario) || 0,
-      admissionDate: String(e.data_admissao || '').slice(0, 10),
-      updatedAt: String(e.updated_at || ''),
-    })
+    mapPayrollEmployeeRow
   );
 
   const investments: InvestmentRecord[] = (investmentsRes.data || []).map((i: any) => ({
@@ -737,6 +783,10 @@ export async function dbCreateOrder(
     companyName: string;
     companyPhone: string;
     toolDescription: string;
+    bladeMeters?: number | null;
+    woodMm?: 15 | 18 | 22 | null;
+    dueDate?: string;
+    financialNotes?: string | null;
     amount: number;
     paymentModality: PaymentModality;
     stage: ProductionStage;
@@ -749,7 +799,7 @@ export async function dbCreateOrder(
   // Regra 5.1: Toda OS nasce obrigatoriamente como "Não Pago", independentemente
   // da forma de pagamento selecionada. Só muda para "Pago" ao clicar em "Marcar como pago".
   const payStatus = 'nao_pago' as const;
-  const dueDate = addDays(today, days);
+  const dueDate = payload.dueDate?.trim() ? payload.dueDate.slice(0, 10) : addDays(today, days);
   const paidAt = null;
   const hist = [{ stage: payload.stage, timestamp: payload.stageUpdatedAt }];
 
@@ -764,6 +814,11 @@ export async function dbCreateOrder(
       cliente_nome: payload.companyName,
       cliente_telefone: payload.companyPhone,
       descricao_ferramenta: payload.toolDescription,
+      blade_meters:
+        payload.bladeMeters != null && Number.isFinite(Number(payload.bladeMeters)) && Number(payload.bladeMeters) > 0
+          ? Number(payload.bladeMeters)
+          : null,
+      wood_mm: payload.woodMm || null,
       valor: roundCurrencyBRL(payload.amount),
       forma_pagamento: payload.paymentModality,
       status_pagamento: payStatus,
@@ -773,32 +828,73 @@ export async function dbCreateOrder(
       version: 1,
       data_vencimento: dueDate,
       data_pagamento: paidAt,
+      observacao_financeira: payload.financialNotes?.trim() || null,
     })
     .select('*')
     .single();
 
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao registrar Ordem de Serviço.'));
-  return {
-    id: data.numero_os,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    companyId: data.cliente_codigo_legado || payload.companyId,
-    companyUuid: data.cliente_empresa_id || undefined,
-    companyName: data.cliente_nome,
-    companyPhone: data.cliente_telefone,
-    toolDescription: data.descricao_ferramenta,
-    amount: Number(data.valor) || 0,
-    paymentModality: data.forma_pagamento,
-    paymentStatus: data.status_pagamento,
-    stage: data.etapa,
-    stageUpdatedAt: data.etapa_atualizada_em,
-    stageHistory: data.historico_etapas || hist,
-    version: Number(data.version) || 1,
-    updatedAt: data.updated_at,
-    createdAt: String(data.created_at || today).slice(0, 10),
-    dueDate: String(data.data_vencimento || dueDate).slice(0, 10),
-    paidAt: data.data_pagamento ? String(data.data_pagamento).slice(0, 10) : undefined,
+  return mapOrderRow(data);
+}
+
+export async function dbUpdateOrderFull(
+  empresaId: string,
+  orderUuid: string,
+  payload: {
+    companyId: string;
+    companyUuid?: string;
+    companyName: string;
+    companyPhone: string;
+    toolDescription: string;
+    bladeMeters?: number | null;
+    woodMm?: 15 | 18 | 22 | null;
+    dueDate?: string;
+    amount: number;
+    paymentModality: PaymentModality;
+    stage: ProductionStage;
+    stageChanged: boolean;
+    stageUpdatedAt: string;
+    stageHistory: StageLog[];
+    currentVersion?: number;
+  }
+): Promise<DieOrder> {
+  const sb = getSupabaseClient();
+  const nextVersion = (Number(payload.currentVersion) || 1) + 1;
+  const updateBody: Record<string, unknown> = {
+    cliente_empresa_id: payload.companyUuid || null,
+    cliente_codigo_legado: payload.companyId,
+    cliente_nome: payload.companyName,
+    cliente_telefone: payload.companyPhone,
+    descricao_ferramenta: payload.toolDescription,
+    blade_meters:
+      payload.bladeMeters != null && Number.isFinite(Number(payload.bladeMeters)) && Number(payload.bladeMeters) > 0
+        ? Number(payload.bladeMeters)
+        : null,
+    wood_mm: payload.woodMm || null,
+    valor: roundCurrencyBRL(payload.amount),
+    forma_pagamento: payload.paymentModality,
+    etapa: payload.stage,
+    version: nextVersion,
   };
+  if (payload.dueDate?.trim()) {
+    updateBody.data_vencimento = payload.dueDate.slice(0, 10);
+  }
+  if (payload.stageChanged) {
+    updateBody.etapa_atualizada_em = payload.stageUpdatedAt;
+    updateBody.historico_etapas = payload.stageHistory;
+  }
+
+  const { data, error } = await sb
+    .from('ordens_servico')
+    .update(updateBody)
+    .eq('id', orderUuid)
+    .eq('empresa_id', empresaId)
+    .is('deleted_at', null)
+    .select('*')
+    .single();
+
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar Ordem de Serviço.'));
+  return mapOrderRow(data);
 }
 
 export async function dbMoveOrderStage(
@@ -823,24 +919,46 @@ export async function dbUpdateOrderPayment(
   empresaId: string,
   ordemUuid: string,
   updates: {
-    status_pagamento: 'pago' | 'a_receber' | 'vencido' | 'sem_nota' | 'nao_pago';
+    status_pagamento: PaymentStatus;
     data_pagamento?: string | null;
     data_vencimento?: string;
+    valor?: number;
+    forma_pagamento?: PaymentModality;
+    observacao_financeira?: string | null;
     version: number;
   }
-): Promise<void> {
+): Promise<DieOrder> {
   const sb = getSupabaseClient();
-  const { error } = await sb
+  const body: Record<string, unknown> = {
+    status_pagamento: updates.status_pagamento,
+    version: updates.version,
+  };
+  if (updates.data_pagamento !== undefined) {
+    body.data_pagamento = updates.data_pagamento;
+  }
+  if (updates.data_vencimento) {
+    body.data_vencimento = updates.data_vencimento.slice(0, 10);
+  }
+  if (updates.valor !== undefined) {
+    body.valor = roundCurrencyBRL(updates.valor);
+  }
+  if (updates.forma_pagamento) {
+    body.forma_pagamento = updates.forma_pagamento;
+  }
+  if (updates.observacao_financeira !== undefined) {
+    body.observacao_financeira = updates.observacao_financeira?.trim() || null;
+  }
+
+  const { data, error } = await sb
     .from('ordens_servico')
-    .update({
-      status_pagamento: updates.status_pagamento,
-      data_pagamento: updates.data_pagamento ?? null,
-      ...(updates.data_vencimento ? { data_vencimento: updates.data_vencimento } : {}),
-      version: updates.version,
-    })
+    .update(body)
     .eq('id', ordemUuid)
-    .eq('empresa_id', empresaId);
-  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar pagamento da OS.'));
+    .eq('empresa_id', empresaId)
+    .is('deleted_at', null)
+    .select('*')
+    .single();
+  if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar dados financeiros da OS.'));
+  return mapOrderRow(data);
 }
 
 export async function dbSoftDeleteOrder(empresaId: string, ordemUuid: string): Promise<void> {
@@ -968,13 +1086,15 @@ export async function dbSoftDeleteReturn(empresaId: string, dbUuid: string): Pro
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir retorno.'));
 }
 
-// ESTOQUE (preserva todas as regras de negócio; persistência real + soft delete no Supabase)
+// ESTOQUE (preserva todas as regras de negócio; persistência real + soft delete no Supabase + quantidades inteiras)
 export async function dbCreateStockItem(
   empresaId: string,
   codigoLegado: string,
   payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<StockItem> {
   const sb = getSupabaseClient();
+  const intQty = toStockInt(payload.quantity);
+  const intMin = toStockInt(payload.minStock);
   const { data, error } = await sb
     .from('estoque_itens')
     .insert({
@@ -983,9 +1103,9 @@ export async function dbCreateStockItem(
       codigo_legado: codigoLegado,
       categoria: payload.category,
       nome: payload.name,
-      quantidade: payload.quantity,
+      quantidade: intQty,
       unidade: payload.unit,
-      estoque_minimo: payload.minStock,
+      estoque_minimo: intMin,
       fornecedor: payload.supplier,
       custo_unitario: payload.unitCost,
       data_entrada: payload.entryDate || toISODate(),
@@ -993,20 +1113,7 @@ export async function dbCreateStockItem(
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar item de estoque.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    category: data.categoria,
-    name: data.nome,
-    quantity: Number(data.quantidade) || 0,
-    unit: data.unidade,
-    minStock: Number(data.estoque_minimo) || 0,
-    supplier: data.fornecedor,
-    unitCost: Number(data.custo_unitario) || 0,
-    entryDate: String(data.data_entrada || '').slice(0, 10),
-    updatedAt: data.updated_at,
-  };
+  return mapStockItemRow(data);
 }
 
 export async function dbUpdateStockItem(
@@ -1015,14 +1122,16 @@ export async function dbUpdateStockItem(
   payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<StockItem> {
   const sb = getSupabaseClient();
+  const intQty = toStockInt(payload.quantity);
+  const intMin = toStockInt(payload.minStock);
   const { data, error } = await sb
     .from('estoque_itens')
     .update({
       categoria: payload.category,
       nome: payload.name,
-      quantidade: payload.quantity,
+      quantidade: intQty,
       unidade: payload.unit,
-      estoque_minimo: payload.minStock,
+      estoque_minimo: intMin,
       fornecedor: payload.supplier,
       custo_unitario: payload.unitCost,
       data_entrada: payload.entryDate || toISODate(),
@@ -1032,20 +1141,7 @@ export async function dbUpdateStockItem(
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar item de estoque.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    category: data.categoria,
-    name: data.nome,
-    quantity: Number(data.quantidade) || 0,
-    unit: data.unidade,
-    minStock: Number(data.estoque_minimo) || 0,
-    supplier: data.fornecedor,
-    unitCost: Number(data.custo_unitario) || 0,
-    entryDate: String(data.data_entrada || '').slice(0, 10),
-    updatedAt: data.updated_at,
-  };
+  return mapStockItemRow(data);
 }
 
 export async function dbSoftDeleteStockItem(empresaId: string, dbUuid: string): Promise<void> {
@@ -1069,9 +1165,11 @@ export async function dbRegisterStockMovement(
     throw new Error('Item de estoque sem identificador no Supabase.');
   }
   const sb = getSupabaseClient();
-  const previousBalance = Number(item.quantity) || 0;
-  const nextBalance = Math.max(0, Number((previousBalance + delta).toFixed(2)));
-  const movedQty = Math.abs(Number((nextBalance - previousBalance).toFixed(2)));
+  const previousBalance = toStockInt(item.quantity);
+  const absDelta = Math.max(1, toStockInt(Math.abs(delta)));
+  const intDelta = delta < 0 ? -absDelta : absDelta;
+  const nextBalance = Math.max(0, previousBalance + intDelta);
+  const movedQty = Math.abs(nextBalance - previousBalance);
 
   if (movedQty <= 0) {
     throw new Error('Saldo já está zerado para este insumo.');
@@ -1110,20 +1208,7 @@ export async function dbRegisterStockMovement(
   if (movErr) throw new Error(toFriendlySupabaseError(movErr, 'Erro ao registrar movimentação de estoque.'));
 
   return {
-    updatedItem: {
-      id: stockRow.codigo_legado || stockRow.id,
-      dbUuid: stockRow.id,
-      company_id: stockRow.empresa_id,
-      category: stockRow.categoria === 'laminas' ? 'laminas' : 'madeiras',
-      name: stockRow.nome,
-      quantity: Number(stockRow.quantidade) || 0,
-      unit: stockRow.unidade,
-      minStock: Number(stockRow.estoque_minimo) || 0,
-      supplier: stockRow.fornecedor,
-      unitCost: Number(stockRow.custo_unitario) || 0,
-      entryDate: String(stockRow.data_entrada || '').slice(0, 10),
-      updatedAt: stockRow.updated_at,
-    },
+    updatedItem: mapStockItemRow(stockRow),
     movement: {
       id: movRow.id,
       empresa_id: movRow.empresa_id,
@@ -1133,9 +1218,9 @@ export async function dbRegisterStockMovement(
       category: (movRow.categoria === 'laminas' ? 'laminas' : 'madeiras') as StockCategory,
       unit: movRow.unidade,
       type: movRow.tipo as StockMovementType,
-      quantity: Number(movRow.quantidade) || movedQty,
-      previousBalance: Number(movRow.saldo_anterior) || previousBalance,
-      newBalance: Number(movRow.saldo_posterior) || nextBalance,
+      quantity: Math.max(1, toStockInt(movRow.quantidade)),
+      previousBalance: toStockInt(movRow.saldo_anterior),
+      newBalance: toStockInt(movRow.saldo_posterior),
       actorName: movRow.responsavel_nome || actorName,
       note: movRow.observacao || undefined,
       revertedAt: movRow.estornado_em || null,
@@ -1154,9 +1239,10 @@ export async function dbRevertStockMovement(
     throw new Error('Item de estoque não localizado para estorno.');
   }
   const sb = getSupabaseClient();
-  const prevBalance = Number(currentItem.quantity) || 0;
-  const reverseDelta = movement.type === 'consumo' ? movement.quantity : -movement.quantity;
-  const nextBalance = Math.max(0, Number((prevBalance + reverseDelta).toFixed(2)));
+  const prevBalance = toStockInt(currentItem.quantity);
+  const movQtyInt = Math.max(1, toStockInt(movement.quantity));
+  const reverseDelta = movement.type === 'consumo' ? movQtyInt : -movQtyInt;
+  const nextBalance = Math.max(0, prevBalance + reverseDelta);
   const nowIso = new Date().toISOString();
 
   const { data: stockRow, error: upErr } = await sb
@@ -1186,7 +1272,7 @@ export async function dbRevertStockMovement(
       categoria: currentItem.category,
       unidade: currentItem.unit,
       tipo: 'estorno',
-      quantidade: movement.quantity,
+      quantidade: movQtyInt,
       saldo_anterior: prevBalance,
       saldo_posterior: nextBalance,
       responsavel_nome: actorName,
@@ -1197,20 +1283,7 @@ export async function dbRevertStockMovement(
   if (estErr) throw new Error(toFriendlySupabaseError(estErr, 'Erro ao registrar estorno de estoque.'));
 
   return {
-    updatedItem: {
-      id: stockRow.codigo_legado || stockRow.id,
-      dbUuid: stockRow.id,
-      company_id: stockRow.empresa_id,
-      category: stockRow.categoria === 'laminas' ? 'laminas' : 'madeiras',
-      name: stockRow.nome,
-      quantity: Number(stockRow.quantidade) || 0,
-      unit: stockRow.unidade,
-      minStock: Number(stockRow.estoque_minimo) || 0,
-      supplier: stockRow.fornecedor,
-      unitCost: Number(stockRow.custo_unitario) || 0,
-      entryDate: String(stockRow.data_entrada || '').slice(0, 10),
-      updatedAt: stockRow.updated_at,
-    },
+    updatedItem: mapStockItemRow(stockRow),
     revertedAt: nowIso,
     estornoMovement: {
       id: estRow.id,
@@ -1221,9 +1294,9 @@ export async function dbRevertStockMovement(
       category: (estRow.categoria === 'laminas' ? 'laminas' : 'madeiras') as StockCategory,
       unit: estRow.unidade,
       type: 'estorno',
-      quantity: Number(estRow.quantidade) || movement.quantity,
-      previousBalance: Number(estRow.saldo_anterior) || prevBalance,
-      newBalance: Number(estRow.saldo_posterior) || nextBalance,
+      quantity: Math.max(1, toStockInt(estRow.quantidade)),
+      previousBalance: toStockInt(estRow.saldo_anterior),
+      newBalance: toStockInt(estRow.saldo_posterior),
       actorName: estRow.responsavel_nome || actorName,
       note: estRow.observacao || undefined,
       revertedAt: null,
@@ -1405,7 +1478,7 @@ export async function dbCreateExpense(
     .insert({
       id: generateUuid(),
       empresa_id: empresaId,
-      categoria: payload.categoria,
+      categoria: normalizeExpenseCategory(payload.categoria),
       descricao: payload.descricao.trim() || null,
       valor: roundedVal,
       data_competencia: payload.data_competencia,
@@ -1415,20 +1488,16 @@ export async function dbCreateExpense(
       forma_pagamento: payload.forma_pagamento,
       fornecedor: payload.fornecedor?.trim() || null,
       observacao: payload.observacao?.trim() || null,
+      ...(payload.origem_tipo ? { origem_tipo: payload.origem_tipo } : {}),
+      ...(payload.origem_id ? { origem_id: payload.origem_id } : {}),
+      ...(payload.competencia_referencia
+        ? { competencia_referencia: payload.competencia_referencia }
+        : {}),
     })
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar despesa.'));
-  return {
-    ...data,
-    descricao: data.descricao || '',
-    valor: roundCurrencyBRL(Number(data.valor)),
-    data_competencia: String(data.data_competencia).slice(0, 10),
-    data_vencimento: data.data_vencimento ? String(data.data_vencimento).slice(0, 10) : undefined,
-    data_pagamento: data.data_pagamento ? String(data.data_pagamento).slice(0, 10) : undefined,
-    fornecedor: data.fornecedor || undefined,
-    observacao: data.observacao || undefined,
-  };
+  return mapExpenseRow(data);
 }
 
 export async function dbUpdateExpense(
@@ -1441,7 +1510,7 @@ export async function dbUpdateExpense(
   const { data, error } = await sb
     .from('despesas')
     .update({
-      categoria: payload.categoria,
+      categoria: normalizeExpenseCategory(payload.categoria),
       descricao: payload.descricao.trim() || null,
       valor: roundedVal,
       data_competencia: payload.data_competencia,
@@ -1457,16 +1526,7 @@ export async function dbUpdateExpense(
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar despesa.'));
-  return {
-    ...data,
-    descricao: data.descricao || '',
-    valor: roundCurrencyBRL(Number(data.valor)),
-    data_competencia: String(data.data_competencia).slice(0, 10),
-    data_vencimento: data.data_vencimento ? String(data.data_vencimento).slice(0, 10) : undefined,
-    data_pagamento: data.data_pagamento ? String(data.data_pagamento).slice(0, 10) : undefined,
-    fornecedor: data.fornecedor || undefined,
-    observacao: data.observacao || undefined,
-  };
+  return mapExpenseRow(data);
 }
 
 export async function dbSoftDeleteExpense(
@@ -1482,6 +1542,215 @@ export async function dbSoftDeleteExpense(
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao excluir despesa.'));
 }
 
+export async function dbSyncCollaboratorExpense(
+  empresaId: string,
+  params: {
+    origemTipo: 'funcionario' | 'prestador';
+    origemId: string;
+    competencia: string; // YYYY-MM
+    isPaid: boolean;
+    nome: string;
+    subtitulo: string;
+    valor: number;
+    formaPagamento: PaymentModality;
+    dataVencimento: string; // YYYY-MM-DD
+    dataPagamento?: string; // YYYY-MM-DD
+  }
+): Promise<{ upserted?: ExpenseRecord; removedIds: string[] }> {
+  const sb = getSupabaseClient();
+  const cleanComp = params.competencia.slice(0, 7);
+
+  const { data: existingRows, error: qErr } = await sb
+    .from('despesas')
+    .select('*')
+    .eq('empresa_id', empresaId)
+    .eq('origem_tipo', params.origemTipo)
+    .eq('origem_id', params.origemId)
+    .eq('competencia_referencia', cleanComp)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true });
+
+  if (qErr) {
+    throw new Error(
+      toFriendlySupabaseError(qErr, 'Erro ao consultar vínculo financeiro do colaborador.')
+    );
+  }
+
+  const rows = existingRows || [];
+  if (!params.isPaid) {
+    const removedIds = rows.map((r: any) => String(r.id));
+    if (removedIds.length > 0) {
+      const { error: delErr } = await sb
+        .from('despesas')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('empresa_id', empresaId)
+        .in('id', removedIds)
+        .is('deleted_at', null);
+      if (delErr) {
+        throw new Error(
+          toFriendlySupabaseError(delErr, 'Erro ao estornar despesa vinculada do colaborador.')
+        );
+      }
+    }
+    return { removedIds };
+  }
+
+  const valor = roundCurrencyBRL(params.valor);
+  if (valor <= 0) {
+    throw new Error('Informe um valor maior que R$ 0,00 antes de marcar como Pago.');
+  }
+
+  const categoria =
+    params.origemTipo === 'funcionario' ? 'folha_colaboradores' : 'prestadores_servico';
+  const cleanSub = params.subtitulo.trim();
+  const descricao =
+    params.origemTipo === 'funcionario'
+      ? `Folha — ${params.nome}${cleanSub ? ` (${cleanSub})` : ''}`
+      : `Prestador — ${params.nome}${cleanSub ? ` (${cleanSub})` : ''}`;
+  const dataCompetencia = (params.dataVencimento || toISODate()).slice(0, 10);
+  const dataPagamento = (params.dataPagamento || toISODate()).slice(0, 10);
+  const formaPag = toExpensePayment(params.formaPagamento || 'pix');
+  const obs = `Pagamento automático (${cleanComp})`;
+
+  const removedIds: string[] = [];
+  if (rows.length > 1) {
+    const extraIds = rows.slice(1).map((r: any) => String(r.id));
+    removedIds.push(...extraIds);
+    await sb
+      .from('despesas')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('empresa_id', empresaId)
+      .in('id', extraIds)
+      .is('deleted_at', null);
+  }
+
+  if (rows.length > 0) {
+    const targetId = rows[0].id;
+    const { data: upRow, error: upErr } = await sb
+      .from('despesas')
+      .update({
+        categoria,
+        descricao,
+        valor,
+        data_competencia: dataCompetencia,
+        data_vencimento: dataCompetencia,
+        data_pagamento: dataPagamento,
+        status: 'pago',
+        forma_pagamento: formaPag,
+        fornecedor: params.nome.trim() || null,
+        observacao: obs,
+      })
+      .eq('id', targetId)
+      .eq('empresa_id', empresaId)
+      .select('*')
+      .single();
+    if (upErr) {
+      throw new Error(
+        toFriendlySupabaseError(upErr, 'Erro ao atualizar despesa vinculada ao colaborador.')
+      );
+    }
+    return { upserted: mapExpenseRow(upRow), removedIds };
+  }
+
+  const { data: insRow, error: insErr } = await sb
+    .from('despesas')
+    .insert({
+      id: generateUuid(),
+      empresa_id: empresaId,
+      categoria,
+      descricao,
+      valor,
+      data_competencia: dataCompetencia,
+      data_vencimento: dataCompetencia,
+      data_pagamento: dataPagamento,
+      status: 'pago',
+      forma_pagamento: formaPag,
+      fornecedor: params.nome.trim() || null,
+      observacao: obs,
+      origem_tipo: params.origemTipo,
+      origem_id: params.origemId,
+      competencia_referencia: cleanComp,
+    })
+    .select('*')
+    .single();
+
+  if (insErr) {
+    if (String((insErr as any)?.code || '') === '23505') {
+      const { data: conflictRow } = await sb
+        .from('despesas')
+        .select('*')
+        .eq('empresa_id', empresaId)
+        .eq('origem_tipo', params.origemTipo)
+        .eq('origem_id', params.origemId)
+        .eq('competencia_referencia', cleanComp)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (conflictRow) {
+        const { data: mergedRow, error: mergeErr } = await sb
+          .from('despesas')
+          .update({
+            categoria,
+            descricao,
+            valor,
+            data_competencia: dataCompetencia,
+            data_vencimento: dataCompetencia,
+            data_pagamento: dataPagamento,
+            status: 'pago',
+            forma_pagamento: formaPag,
+            fornecedor: params.nome.trim() || null,
+            observacao: obs,
+          })
+          .eq('id', conflictRow.id)
+          .eq('empresa_id', empresaId)
+          .select('*')
+          .single();
+        if (mergeErr) {
+          throw new Error(
+            toFriendlySupabaseError(mergeErr, 'Erro ao sincronizar pagamento do colaborador.')
+          );
+        }
+        return { upserted: mapExpenseRow(mergedRow), removedIds };
+      }
+    }
+    throw new Error(
+      toFriendlySupabaseError(insErr, 'Erro ao registrar despesa automática do colaborador.')
+    );
+  }
+
+  return { upserted: mapExpenseRow(insRow), removedIds };
+}
+
+export async function dbSoftDeleteCollaboratorLinkedExpenses(
+  empresaId: string,
+  origemTipo: 'funcionario' | 'prestador',
+  origemId: string
+): Promise<string[]> {
+  const sb = getSupabaseClient();
+  const { data: activeRows } = await sb
+    .from('despesas')
+    .select('id')
+    .eq('empresa_id', empresaId)
+    .eq('origem_tipo', origemTipo)
+    .eq('origem_id', origemId)
+    .is('deleted_at', null);
+
+  const ids = (activeRows || []).map((r: any) => String(r.id));
+  if (ids.length > 0) {
+    const { error } = await sb
+      .from('despesas')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('empresa_id', empresaId)
+      .in('id', ids)
+      .is('deleted_at', null);
+    if (error) {
+      throw new Error(
+        toFriendlySupabaseError(error, 'Erro ao remover despesas vinculadas ao colaborador.')
+      );
+    }
+  }
+  return ids;
+}
+
 // PRESTADORES, FUNCIONÁRIOS FOLHA, INVESTIMENTOS
 export async function dbCreateProvider(
   empresaId: string,
@@ -1489,6 +1758,14 @@ export async function dbCreateProvider(
   payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<ServiceProviderRecord> {
   const sb = getSupabaseClient();
+  const dueDate = payload.dueDate || toISODate();
+  const dayNum = Math.min(
+    31,
+    Math.max(
+      1,
+      Math.round(Number(payload.paymentDay) || Number(dueDate.slice(8, 10)) || 5)
+    )
+  );
   const { data, error } = await sb
     .from('prestadores_servico')
     .insert({
@@ -1499,24 +1776,14 @@ export async function dbCreateProvider(
       servico: payload.service,
       valor: roundCurrencyBRL(payload.amount),
       forma_pagamento: toExpensePayment(payload.paymentModality),
-      data_vencimento: payload.dueDate || toISODate(),
+      data_vencimento: dueDate,
+      dia_pagamento: dayNum,
       status: payload.status,
     })
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar prestador.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    name: data.nome,
-    service: data.servico,
-    amount: Number(data.valor),
-    paymentModality: fromExpensePayment(data.forma_pagamento),
-    dueDate: String(data.data_vencimento).slice(0, 10),
-    status: data.status,
-    updatedAt: data.updated_at,
-  };
+  return mapProviderRow(data);
 }
 
 export async function dbUpdateProvider(
@@ -1525,6 +1792,14 @@ export async function dbUpdateProvider(
   payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<ServiceProviderRecord> {
   const sb = getSupabaseClient();
+  const dueDate = payload.dueDate || toISODate();
+  const dayNum = Math.min(
+    31,
+    Math.max(
+      1,
+      Math.round(Number(payload.paymentDay) || Number(dueDate.slice(8, 10)) || 5)
+    )
+  );
   const { data, error } = await sb
     .from('prestadores_servico')
     .update({
@@ -1532,7 +1807,8 @@ export async function dbUpdateProvider(
       servico: payload.service,
       valor: roundCurrencyBRL(payload.amount),
       forma_pagamento: toExpensePayment(payload.paymentModality),
-      data_vencimento: payload.dueDate || toISODate(),
+      data_vencimento: dueDate,
+      dia_pagamento: dayNum,
       status: payload.status,
     })
     .eq('id', dbUuid)
@@ -1540,18 +1816,7 @@ export async function dbUpdateProvider(
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar prestador.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    name: data.nome,
-    service: data.servico,
-    amount: Number(data.valor),
-    paymentModality: fromExpensePayment(data.forma_pagamento),
-    dueDate: String(data.data_vencimento).slice(0, 10),
-    status: data.status,
-    updatedAt: data.updated_at,
-  };
+  return mapProviderRow(data);
 }
 
 export async function dbSoftDeleteProvider(empresaId: string, dbUuid: string): Promise<void> {
@@ -1570,6 +1835,12 @@ export async function dbCreatePayrollEmployee(
   payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<PayrollEmployeeRecord> {
   const sb = getSupabaseClient();
+  const dayNum = Math.min(31, Math.max(1, Math.round(Number(payload.paymentDay) || 5)));
+  const isPaid = payload.paymentStatus === 'pago';
+  const paidCompetence = isPaid
+    ? (payload.paidCompetence || toISODate().slice(0, 7)).slice(0, 7)
+    : null;
+  const paidAt = isPaid ? (payload.paidAt || toISODate()).slice(0, 10) : null;
   const { data, error } = await sb
     .from('funcionarios_folha')
     .insert({
@@ -1580,20 +1851,16 @@ export async function dbCreatePayrollEmployee(
       cargo: payload.roleTitle,
       salario: roundCurrencyBRL(payload.salary),
       data_admissao: payload.admissionDate || toISODate(),
+      dia_pagamento: dayNum,
+      status_pagamento: isPaid ? 'pago' : 'pendente',
+      forma_pagamento: toExpensePayment(payload.paymentModality || 'pix'),
+      data_pagamento: paidAt,
+      competencia_paga: paidCompetence,
     })
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao cadastrar colaborador na folha.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    name: data.nome,
-    roleTitle: data.cargo,
-    salary: Number(data.salario),
-    admissionDate: String(data.data_admissao).slice(0, 10),
-    updatedAt: data.updated_at,
-  };
+  return mapPayrollEmployeeRow(data);
 }
 
 export async function dbUpdatePayrollEmployee(
@@ -1602,6 +1869,12 @@ export async function dbUpdatePayrollEmployee(
   payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
 ): Promise<PayrollEmployeeRecord> {
   const sb = getSupabaseClient();
+  const dayNum = Math.min(31, Math.max(1, Math.round(Number(payload.paymentDay) || 5)));
+  const isPaid = payload.paymentStatus === 'pago';
+  const paidCompetence = isPaid
+    ? (payload.paidCompetence || toISODate().slice(0, 7)).slice(0, 7)
+    : null;
+  const paidAt = isPaid ? (payload.paidAt || toISODate()).slice(0, 10) : null;
   const { data, error } = await sb
     .from('funcionarios_folha')
     .update({
@@ -1609,22 +1882,18 @@ export async function dbUpdatePayrollEmployee(
       cargo: payload.roleTitle,
       salario: roundCurrencyBRL(payload.salary),
       data_admissao: payload.admissionDate || toISODate(),
+      dia_pagamento: dayNum,
+      status_pagamento: isPaid ? 'pago' : 'pendente',
+      forma_pagamento: toExpensePayment(payload.paymentModality || 'pix'),
+      data_pagamento: paidAt,
+      competencia_paga: paidCompetence,
     })
     .eq('id', dbUuid)
     .eq('empresa_id', empresaId)
     .select('*')
     .single();
   if (error) throw new Error(toFriendlySupabaseError(error, 'Erro ao atualizar colaborador na folha.'));
-  return {
-    id: data.codigo_legado || data.id,
-    dbUuid: data.id,
-    company_id: data.empresa_id,
-    name: data.nome,
-    roleTitle: data.cargo,
-    salary: Number(data.salario),
-    admissionDate: String(data.data_admissao).slice(0, 10),
-    updatedAt: data.updated_at,
-  };
+  return mapPayrollEmployeeRow(data);
 }
 
 export async function dbSoftDeletePayrollEmployee(

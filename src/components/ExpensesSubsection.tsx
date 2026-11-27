@@ -6,6 +6,7 @@ import {
   EXPENSE_CATEGORIES,
   formatBRL,
   formatCurrencyMask,
+  normalizeExpenseCategory,
   parseCurrencyMask,
 } from '../utils/financeEngine';
 
@@ -30,10 +31,14 @@ export const ExpensesSubsection: React.FC<ExpensesSubsectionProps> = ({
 
   useEffect(() => {
     const existing = expenses.find((e) => e.month === selectedMonth);
-    setDraftValues({
-      ...createEmptyExpensesMap(),
-      ...(existing?.values || {}),
-    });
+    const initial = createEmptyExpensesMap();
+    if (existing?.values) {
+      for (const [rawKey, val] of Object.entries(existing.values)) {
+        const normKey = normalizeExpenseCategory(rawKey);
+        initial[normKey] = (initial[normKey] || 0) + Number(val || 0);
+      }
+    }
+    setDraftValues(initial);
   }, [selectedMonth, expenses]);
 
   const monthTotal = EXPENSE_CATEGORIES.reduce(
@@ -42,10 +47,11 @@ export const ExpensesSubsection: React.FC<ExpensesSubsectionProps> = ({
   );
 
   const handleAmountChange = (key: ExpenseCategoryKey, rawInput: string) => {
+    const safeKey = normalizeExpenseCategory(key);
     const parsed = parseCurrencyMask(rawInput);
     const next = {
       ...draftValues,
-      [key]: parsed,
+      [safeKey]: parsed,
     };
     setDraftValues(next);
     onUpsertMonthExpenses(selectedMonth, next);

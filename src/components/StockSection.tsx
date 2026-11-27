@@ -27,6 +27,8 @@ import {
   formatBRL,
   formatDateBR,
   formatDateTimeGoiasBR,
+  formatStockInt,
+  sanitizeStockIntInput,
   toISODate,
 } from '../utils/financeEngine';
 
@@ -142,13 +144,19 @@ export const StockSection: React.FC<StockSectionProps> = ({
     }
   };
 
+  const handleBlockDecimalKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (['.', ',', 'e', 'E', '-', '+'].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
+
   const handleStartEdit = (item: StockItem) => {
     setEditingId(item.id);
     setCategory(item.category);
     setName(item.name);
-    setQuantity(String(item.quantity));
+    setQuantity(formatStockInt(item.quantity));
     setUnit(item.unit);
-    setMinStock(String(item.minStock));
+    setMinStock(formatStockInt(item.minStock));
     setSupplier(item.supplier);
     setUnitCost(String(item.unitCost));
     setEntryDate(item.entryDate);
@@ -158,12 +166,17 @@ export const StockSection: React.FC<StockSectionProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
+    const cleanQty = sanitizeStockIntInput(quantity);
+    const cleanMin = sanitizeStockIntInput(minStock);
+    const parsedQty = Math.max(0, Math.round(Number(cleanQty) || 0));
+    const parsedMin = Math.max(0, Math.round(Number(cleanMin) || 0));
+
     const payload: Omit<StockItem, 'id' | 'company_id' | 'updatedAt'> = {
       category,
       name: name.trim(),
-      quantity: Math.max(0, parseFloat(quantity.replace(',', '.')) || 0),
+      quantity: parsedQty,
       unit: unit.trim() || CATEGORY_META[category].defaultUnit,
-      minStock: Math.max(0, parseFloat(minStock.replace(',', '.')) || 0),
+      minStock: parsedMin,
       supplier: supplier.trim() || 'Não informado',
       unitCost: Math.max(0, parseFloat(unitCost.replace(',', '.')) || 0),
       entryDate: entryDate || toISODate(),
@@ -206,10 +219,8 @@ export const StockSection: React.FC<StockSectionProps> = ({
     const targetItem =
       items.find((i) => i.id === selectedConsumeId) || items[0];
     if (!targetItem) return;
-    const qty = Math.max(
-      0.01,
-      parseFloat(customConsumeQty.replace(',', '.')) || 1
-    );
+    const clean = sanitizeStockIntInput(customConsumeQty);
+    const qty = Math.max(1, Math.round(Number(clean) || 1));
     await handleTriggerConsume(targetItem, qty, consumeNote.trim() || undefined);
     setCustomConsumeQty('1');
     setConsumeNote('');
@@ -357,7 +368,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                         {isLow ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/25 text-amber-900 border border-amber-400/70">
                             <AlertTriangle className="w-3 h-3 text-amber-700" />
-                            Estoque Baixo (≤ {item.minStock} {item.unit})
+                            Estoque Baixo (≤ {formatStockInt(item.minStock)} {item.unit})
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-800 border border-emerald-300/60">
@@ -411,10 +422,10 @@ export const StockSection: React.FC<StockSectionProps> = ({
                               isLow ? 'text-amber-800' : 'text-slate-900'
                             }`}
                           >
-                            {item.quantity} {item.unit}
+                            {formatStockInt(item.quantity)} {item.unit}
                           </span>
                           <span className="text-[10px] font-semibold text-slate-600">
-                            Mín: {item.minStock}
+                            Mín: {formatStockInt(item.minStock)}
                           </span>
                         </div>
                         <button
@@ -583,7 +594,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                       <p className="text-[11px] font-semibold text-slate-600 mt-0.5 font-mono">
                         Saldo atual:{' '}
                         <strong className={isLow ? 'text-amber-900' : 'text-slate-900'}>
-                          {item.quantity} {item.unit}
+                          {formatStockInt(item.quantity)} {item.unit}
                         </strong>
                       </p>
                     </div>
@@ -612,7 +623,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                 >
                   {items.map((it) => (
                     <option key={it.id} value={it.id}>
-                      {it.name} (Saldo: {it.quantity} {it.unit})
+                      {it.name} (Saldo: {formatStockInt(it.quantity)} {it.unit})
                     </option>
                   ))}
                 </select>
@@ -624,11 +635,13 @@ export const StockSection: React.FC<StockSectionProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.01"
-                  min="0.01"
+                  step="1"
+                  min="1"
+                  inputMode="numeric"
                   required
                   value={customConsumeQty}
-                  onChange={(e) => setCustomConsumeQty(e.target.value)}
+                  onKeyDown={handleBlockDecimalKeys}
+                  onChange={(e) => setCustomConsumeQty(sanitizeStockIntInput(e.target.value))}
                   className={`${inputClass} font-mono font-bold`}
                 />
               </div>
@@ -710,8 +723,8 @@ export const StockSection: React.FC<StockSectionProps> = ({
                               {isEstorno
                                 ? 'Estorno'
                                 : isConsumo
-                                  ? `- ${mov.quantity} ${mov.unit}`
-                                  : `+ ${mov.quantity} ${mov.unit}`}
+                                  ? `- ${formatStockInt(mov.quantity)} ${mov.unit}`
+                                  : `+ ${formatStockInt(mov.quantity)} ${mov.unit}`}
                             </span>
                             <span className="font-extrabold text-slate-900 truncate">
                               {mov.itemName}
@@ -733,7 +746,7 @@ export const StockSection: React.FC<StockSectionProps> = ({
                               {formatDateTimeGoiasBR(mov.createdAt)}
                             </span>
                             <span className="font-mono">
-                              Saldo: {mov.previousBalance} → <strong>{mov.newBalance}</strong>
+                              Saldo: {formatStockInt(mov.previousBalance)} → <strong>{formatStockInt(mov.newBalance)}</strong>
                             </span>
                           </div>
                         </div>
@@ -923,11 +936,13 @@ export const StockSection: React.FC<StockSectionProps> = ({
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="1"
                 min="0"
+                inputMode="numeric"
                 required
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onKeyDown={handleBlockDecimalKeys}
+                onChange={(e) => setQuantity(sanitizeStockIntInput(e.target.value))}
                 placeholder="Ex: 12"
                 className={`${inputClass} font-mono font-bold`}
               />
@@ -953,11 +968,13 @@ export const StockSection: React.FC<StockSectionProps> = ({
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="1"
                 min="0"
+                inputMode="numeric"
                 required
                 value={minStock}
-                onChange={(e) => setMinStock(e.target.value)}
+                onKeyDown={handleBlockDecimalKeys}
+                onChange={(e) => setMinStock(sanitizeStockIntInput(e.target.value))}
                 placeholder="Ex: 5"
                 className={`${inputClass} font-mono font-bold`}
               />

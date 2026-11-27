@@ -51,6 +51,7 @@ import {
   dbRevertStockMovement,
   dbSaveNote,
   dbSoftDeleteCompany,
+  dbSoftDeleteCollaboratorLinkedExpenses,
   dbSoftDeleteDelivery,
   dbSoftDeleteExpense,
   dbSoftDeleteInvestment,
@@ -60,10 +61,12 @@ import {
   dbSoftDeleteProvider,
   dbSoftDeleteReturn,
   dbSoftDeleteStockItem,
+  dbSyncCollaboratorExpense,
   dbUpdateCompanySettings,
   dbUpdateExpense,
   dbUpdateInvestment,
   dbUpdateNoteStatus,
+  dbUpdateOrderFull,
   dbUpdateOrderPayment,
   dbUpdatePayrollEmployee,
   dbUpdateProvider,
@@ -100,7 +103,8 @@ import {
   ExpenseRecord,
   InvestmentRecord,
   NoteRecord,
-  PaymentModality,
+  OrderFinanceUpdatePayload,
+  OrderUpsertPayload,
   PaymentStatus,
   PayrollEmployeeRecord,
   PedidoEmitterProfile,
@@ -117,6 +121,8 @@ import {
   computeFinancialBreakdown,
   nowTimestampBR,
   PRODUCTION_STAGES,
+  resolveMonthPaymentDate,
+  roundCurrencyBRL,
   toISODate,
 } from './utils/financeEngine';
 
@@ -149,6 +155,20 @@ function createEmptyDb(companyId = ''): EnterpriseDatabase {
   };
 }
 
+function mergeSyncedExpenses(
+  current: ExpenseRecord[] | undefined,
+  syncResult: { upserted?: ExpenseRecord; removedIds: string[] }
+): ExpenseRecord[] {
+  const removedSet = new Set(syncResult.removedIds || []);
+  let list = (current || []).filter((d) => !removedSet.has(d.id));
+  if (syncResult.upserted) {
+    const up = syncResult.upserted;
+    const exists = list.some((d) => d.id === up.id);
+    list = exists ? list.map((d) => (d.id === up.id ? up : d)) : [up, ...list];
+  }
+  return list;
+}
+
 export const App: React.FC = () => {
   const [authChecking, setAuthChecking] = useState(true);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -165,6 +185,7 @@ export const App: React.FC = () => {
   const [prefillDeliveryOrder, setPrefillDeliveryOrder] =
     useState<DieOrder | null>(null);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<DieOrder | null>(null);
   const [printJob, setPrintJob] = useState<{
     note: NoteRecord;
     emitter: PedidoEmitterProfile;
@@ -364,6 +385,7 @@ export const App: React.FC = () => {
         }
         pendingOrderIdsRef.current.clear();
         setPendingOrderIds([]);
+        setEditingOrder(null);
         setSession(null);
         setDb(createEmptyDb());
       }
@@ -499,6 +521,7 @@ export const App: React.FC = () => {
     setDb(createEmptyDb());
     setSearchQuery('');
     setIsNewModalOpen(false);
+    setEditingOrder(null);
     setSettingsState({
       settings: {
         empresa_id: '',
@@ -652,15 +675,9 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCreateOrderFull = async (payload: {
-    companyId: string;
-    companyName: string;
-    companyPhone: string;
-    toolDescription: string;
-    amount: number;
-    paymentModality: PaymentModality;
-    stage: ProductionStage;
-  }): Promise<boolean> => {
+  const handleCreateOrderFull = async (
+    payload: OrderUpsertPayload
+  ): Promise<boolean> => {
     const active = sessionRef.current;
     if (!active || active.role !== 'admin') {
       showToast('Apenas administradores podem cadastrar novas OS.', 'err');
@@ -692,6 +709,9 @@ export const App: React.FC = () => {
         companyName: existingComp.corporateName,
         companyPhone: existingComp.phone || payload.companyPhone,
         toolDescription: payload.toolDescription,
+        bladeMeters: payload.bladeMeters ?? null,
+        woodMm: payload.woodMm ?? null,
+        dueDate: payload.dueDate,
         amount: payload.amount,
         paymentModality: payload.paymentModality,
         stage: payload.stage,
@@ -722,6 +742,117 @@ export const App: React.FC = () => {
       return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao criar Ordem de Serviço.', 'err');
+      return false;
+    }
+  };
+
+  const handleUpdateOrderFull = async (
+    orderId: string,
+    payload: OrderUpsertPayload
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') {
+      showToast('Apenas administradores podem editar OS.', 'err');
+      return false;
+    }
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const snap = dbRef.current;
+    const existingOrder = snap.orders.find((o) => o.id === orderId);
+    if (!existingOrder?.dbUuid) {
+      showToast('Ordem de Serviço não localizada para edição.', 'err');
+      return false;
+    }
+
+    try {
+      const stamp = nowTimestampBR();
+      let existingComp =
+        payload.companyId && payload.companyId !== '__new__'
+          ? snap.companies.find((c) => c.id === payload.companyId)
+          : undefined;
+      let newCompCreated: Company | null = null;
+
+      if (!existingComp) {
+        const compCode = getNextCompanyCode(snap.companies);
+        newCompCreated = await dbCreateCompany(targetEmpresaId, compCode, {
+          corporateName: payload.companyName,
+          cnpj: 'Não informado',
+          phone: payload.companyPhone,
+          contactName: 'PCP / Compras',
+        });
+        existingComp = newCompCreated;
+      }
+
+      const stageChanged = existingOrder.stage !== payload.stage;
+      const nextHistory = stageChanged
+        ? [
+            ...(existingOrder.stageHistory || []),
+            { stage: payload.stage, timestamp: stamp },
+          ]
+        : existingOrder.stageHistory || [];
+
+      const updatedOrder = await dbUpdateOrderFull(
+        targetEmpresaId,
+        existingOrder.dbUuid,
+        {
+          companyId: existingComp.id,
+          companyUuid: existingComp.dbUuid,
+          companyName: existingComp.corporateName,
+          companyPhone: existingComp.phone || payload.companyPhone,
+          toolDescription: payload.toolDescription,
+          bladeMeters: payload.bladeMeters ?? null,
+          woodMm: payload.woodMm ?? null,
+          dueDate: payload.dueDate || existingOrder.dueDate,
+          amount: payload.amount,
+          paymentModality: payload.paymentModality,
+          stage: payload.stage,
+          stageChanged,
+          stageUpdatedAt: stageChanged ? stamp : existingOrder.stageUpdatedAt,
+          stageHistory: nextHistory,
+          currentVersion: existingOrder.version,
+        }
+      );
+
+      setDb((prev) => ({
+        ...prev,
+        companies: newCompCreated
+          ? [newCompCreated, ...prev.companies]
+          : prev.companies,
+        orders: prev.orders.map((o) => (o.id === orderId ? updatedOrder : o)),
+        deliveries: prev.deliveries.map((d) =>
+          d.orderId === orderId
+            ? {
+                ...d,
+                companyName: updatedOrder.companyName,
+                toolDescription: updatedOrder.toolDescription,
+              }
+            : d
+        ),
+        returns: prev.returns.map((r) =>
+          r.orderId === orderId
+            ? {
+                ...r,
+                companyName: updatedOrder.companyName,
+                toolDescription: updatedOrder.toolDescription,
+              }
+            : r
+        ),
+      }));
+      setPrefillDeliveryOrder((prev) =>
+        prev?.id === orderId ? updatedOrder : prev
+      );
+      publishRealtimeUpdate({
+        company_id: targetEmpresaId,
+        section: 'esteira',
+        actionLabel: '',
+        actorName: active.ownerName,
+        actorRole: active.role,
+        order: updatedOrder,
+      });
+      scheduleAutoBackup();
+      showToast(`${updatedOrder.id} atualizada com sucesso!`);
+      return true;
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao atualizar Ordem de Serviço.', 'err');
       return false;
     }
   };
@@ -832,7 +963,7 @@ export const App: React.FC = () => {
     const nextVersion = (Number(order.version) || 1) + 1;
 
     try {
-      await dbUpdateOrderPayment(empresaId, order.dbUuid, {
+      const updatedOrder = await dbUpdateOrderPayment(empresaId, order.dbUuid, {
         status_pagamento: nextStatus,
         data_pagamento: nextPaidAt,
         version: nextVersion,
@@ -840,17 +971,17 @@ export const App: React.FC = () => {
       setDb((prev) => ({
         ...prev,
         orders: prev.orders.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                paymentStatus: nextStatus,
-                paidAt: nextPaidAt || undefined,
-                version: nextVersion,
-                updatedAt: new Date().toISOString(),
-              }
-            : o
+          o.id === orderId ? updatedOrder : o
         ),
       }));
+      publishRealtimeUpdate({
+        company_id: empresaId,
+        section: 'financeiro',
+        actionLabel: '',
+        actorName: active.ownerName,
+        actorRole: active.role,
+        order: updatedOrder,
+      });
       scheduleAutoBackup();
       showToast(
         nextStatus === 'pago'
@@ -873,7 +1004,7 @@ export const App: React.FC = () => {
     const nextVersion = (Number(order.version) || 1) + 1;
 
     try {
-      await dbUpdateOrderPayment(empresaId, order.dbUuid, {
+      const updatedOrder = await dbUpdateOrderPayment(empresaId, order.dbUuid, {
         status_pagamento: 'a_receber',
         data_vencimento: nextDue,
         version: nextVersion,
@@ -881,21 +1012,75 @@ export const App: React.FC = () => {
       setDb((prev) => ({
         ...prev,
         orders: prev.orders.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                paymentStatus: 'a_receber',
-                dueDate: nextDue,
-                version: nextVersion,
-                updatedAt: new Date().toISOString(),
-              }
-            : o
+          o.id === orderId ? updatedOrder : o
         ),
       }));
+      publishRealtimeUpdate({
+        company_id: empresaId,
+        section: 'financeiro',
+        actionLabel: '',
+        actorName: active.ownerName,
+        actorRole: active.role,
+        order: updatedOrder,
+      });
       scheduleAutoBackup();
       showToast(`Faturamento 30 dias gerado para ${orderId}!`);
     } catch (err: any) {
       showToast(err?.message || 'Erro ao gerar faturamento.', 'err');
+    }
+  };
+
+  const handleUpdateOrderFinance = async (
+    orderId: string,
+    payload: OrderFinanceUpdatePayload
+  ): Promise<boolean> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin') return false;
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const order = dbRef.current.orders.find((o) => o.id === orderId);
+    if (!order?.dbUuid) return false;
+
+    const nextVersion = (Number(order.version) || 1) + 1;
+    const nextPaidAt =
+      payload.paymentStatus === 'pago'
+        ? (payload.paidAt || toISODate()).slice(0, 10)
+        : null;
+
+    try {
+      const updatedOrder = await dbUpdateOrderPayment(
+        targetEmpresaId,
+        order.dbUuid,
+        {
+          valor: payload.amount,
+          forma_pagamento: payload.paymentModality,
+          status_pagamento: payload.paymentStatus,
+          data_vencimento: payload.dueDate,
+          data_pagamento: nextPaidAt,
+          observacao_financeira: payload.financialNotes ?? null,
+          version: nextVersion,
+        }
+      );
+      setDb((prev) => ({
+        ...prev,
+        orders: prev.orders.map((o) => (o.id === orderId ? updatedOrder : o)),
+      }));
+      publishRealtimeUpdate({
+        company_id: targetEmpresaId,
+        section: 'financeiro',
+        actionLabel: '',
+        actorName: active.ownerName,
+        actorRole: active.role,
+        order: updatedOrder,
+      });
+      scheduleAutoBackup();
+      showToast(`Dados financeiros da ${orderId} atualizados!`);
+      return true;
+    } catch (err: any) {
+      showToast(
+        err?.message || 'Erro ao atualizar dados financeiros da OS.',
+        'err'
+      );
+      return false;
     }
   };
 
@@ -1292,6 +1477,134 @@ export const App: React.FC = () => {
     }
   };
 
+  const syncCollaboratorFromExpenseChange = async (
+    targetEmpresaId: string,
+    expense: ExpenseRecord,
+    isUnpaidOrRemoved: boolean
+  ) => {
+    if (!expense.origem_tipo || !expense.origem_id) return;
+    const expComp = (
+      expense.competencia_referencia ||
+      expense.data_competencia ||
+      ''
+    ).slice(0, 7);
+    const currentComp = toISODate().slice(0, 7);
+
+    if (expense.origem_tipo === 'prestador') {
+      const prov = (dbRef.current.serviceProviders || []).find(
+        (p) => p.dbUuid === expense.origem_id
+      );
+      if (!prov?.dbUuid) return;
+      const provComp = (prov.dueDate || '').slice(0, 7);
+      const matchesActive = provComp === expComp || expComp === currentComp;
+      if (!matchesActive) return;
+
+      if (isUnpaidOrRemoved && prov.status === 'pago') {
+        const updatedProv = await dbUpdateProvider(targetEmpresaId, prov.dbUuid, {
+          name: prov.name,
+          service: prov.service,
+          amount: prov.amount,
+          paymentModality: prov.paymentModality,
+          dueDate: prov.dueDate,
+          paymentDay: prov.paymentDay,
+          status: 'pendente',
+        });
+        setDb((prev) => ({
+          ...prev,
+          serviceProviders: (prev.serviceProviders || []).map((p) =>
+            p.id === prov.id ? updatedProv : p
+          ),
+        }));
+      } else if (
+        !isUnpaidOrRemoved &&
+        (prov.status !== 'pago' ||
+          roundCurrencyBRL(prov.amount) !== roundCurrencyBRL(expense.valor))
+      ) {
+        const syncedAmount = roundCurrencyBRL(expense.valor);
+        const updatedProv = await dbUpdateProvider(targetEmpresaId, prov.dbUuid, {
+          name: prov.name,
+          service: prov.service,
+          amount: syncedAmount > 0 ? syncedAmount : prov.amount,
+          paymentModality: prov.paymentModality,
+          dueDate: prov.dueDate,
+          paymentDay: prov.paymentDay,
+          status: 'pago',
+        });
+        setDb((prev) => ({
+          ...prev,
+          serviceProviders: (prev.serviceProviders || []).map((p) =>
+            p.id === prov.id ? updatedProv : p
+          ),
+        }));
+      }
+      return;
+    }
+
+    if (expense.origem_tipo === 'funcionario') {
+      const emp = (dbRef.current.payrollEmployees || []).find(
+        (e) => e.dbUuid === expense.origem_id
+      );
+      if (!emp?.dbUuid) return;
+
+      if (
+        isUnpaidOrRemoved &&
+        emp.paymentStatus === 'pago' &&
+        (!emp.paidCompetence ||
+          emp.paidCompetence.slice(0, 7) === expComp ||
+          expComp === currentComp)
+      ) {
+        const updatedEmp = await dbUpdatePayrollEmployee(
+          targetEmpresaId,
+          emp.dbUuid,
+          {
+            name: emp.name,
+            roleTitle: emp.roleTitle,
+            salary: emp.salary,
+            admissionDate: emp.admissionDate,
+            paymentDay: emp.paymentDay,
+            paymentModality: emp.paymentModality,
+            paymentStatus: 'pendente',
+            paidAt: undefined,
+            paidCompetence: undefined,
+          }
+        );
+        setDb((prev) => ({
+          ...prev,
+          payrollEmployees: (prev.payrollEmployees || []).map((e) =>
+            e.id === emp.id ? updatedEmp : e
+          ),
+        }));
+      } else if (
+        !isUnpaidOrRemoved &&
+        expComp === currentComp &&
+        (emp.paymentStatus !== 'pago' ||
+          (emp.paidCompetence || '').slice(0, 7) !== expComp)
+      ) {
+        const updatedEmp = await dbUpdatePayrollEmployee(
+          targetEmpresaId,
+          emp.dbUuid,
+          {
+            name: emp.name,
+            roleTitle: emp.roleTitle,
+            salary: emp.salary,
+            admissionDate: emp.admissionDate,
+            paymentDay: emp.paymentDay,
+            paymentModality: emp.paymentModality,
+            paymentStatus: 'pago',
+            paidAt: expense.data_pagamento || toISODate(),
+            paidCompetence: expComp,
+          }
+        );
+        setDb((prev) => ({
+          ...prev,
+          payrollEmployees: (prev.payrollEmployees || []).map((e) =>
+            e.id === emp.id ? updatedEmp : e
+          ),
+        }));
+      }
+    }
+  };
+
   // Finanças -> Despesas (Seção 3 - CRUD completo com Soft Delete + RBAC Admin)
   const handleCreateExpense = async (
     payload: ExpenseDraftPayload
@@ -1318,11 +1631,19 @@ export const App: React.FC = () => {
     if (!active || active.role !== 'admin') {
       throw new Error('Apenas administradores podem editar despesas.');
     }
-    const updated = await dbUpdateExpense(empresaId, id, payload);
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const updated = await dbUpdateExpense(targetEmpresaId, id, payload);
     setDb((prev) => ({
       ...prev,
       despesas: (prev.despesas || []).map((d) => (d.id === id ? updated : d)),
     }));
+    if (updated.origem_tipo && updated.origem_id) {
+      await syncCollaboratorFromExpenseChange(
+        targetEmpresaId,
+        updated,
+        updated.status !== 'pago'
+      );
+    }
     scheduleAutoBackup();
     showToast('Despesa atualizada!');
     return updated;
@@ -1333,31 +1654,73 @@ export const App: React.FC = () => {
     if (!active || active.role !== 'admin') {
       throw new Error('Apenas administradores podem excluir despesas.');
     }
-    await dbSoftDeleteExpense(empresaId, id);
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const existingExpense = (dbRef.current.despesas || []).find(
+      (d) => d.id === id
+    );
+    await dbSoftDeleteExpense(targetEmpresaId, id);
     setDb((prev) => ({
       ...prev,
       despesas: (prev.despesas || []).filter((d) => d.id !== id),
     }));
+    if (existingExpense?.origem_tipo && existingExpense?.origem_id) {
+      await syncCollaboratorFromExpenseChange(
+        targetEmpresaId,
+        existingExpense,
+        true
+      );
+    }
     scheduleAutoBackup();
     showToast('Despesa removida!');
   };
 
-  // Finanças -> Prestadores, Folha, Investimentos
+  // Finanças -> Prestadores, Folha, Investimentos (com sincronização bidirecional em Despesas)
   const handleAddProvider = async (
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
   ): Promise<boolean> => {
     const active = sessionRef.current;
     if (!active || active.role !== 'admin') return false;
+    if (payload.status === 'pago' && (Number(payload.amount) || 0) <= 0) {
+      showToast(
+        'Informe um valor maior que R$ 0,00 antes de marcar o prestador como Pago.',
+        'err'
+      );
+      return false;
+    }
     const targetEmpresaId = active.empresaId || active.company_id;
     try {
       const code = getNextProviderId(dbRef.current);
       const created = await dbCreateProvider(targetEmpresaId, code, payload);
+      const competence = (created.dueDate || toISODate()).slice(0, 7);
+      const day =
+        created.paymentDay || Number((created.dueDate || '').slice(8, 10)) || 5;
+      const dataVencimento = resolveMonthPaymentDate(competence, day);
+      const syncRes = created.dbUuid
+        ? await dbSyncCollaboratorExpense(targetEmpresaId, {
+            origemTipo: 'prestador',
+            origemId: created.dbUuid,
+            competencia: competence,
+            isPaid: created.status === 'pago',
+            nome: created.name,
+            subtitulo: created.service,
+            valor: created.amount,
+            formaPagamento: created.paymentModality || 'pix',
+            dataVencimento,
+            dataPagamento: created.status === 'pago' ? toISODate() : undefined,
+          })
+        : { removedIds: [] };
+
       setDb((prev) => ({
         ...prev,
         serviceProviders: [created, ...(prev.serviceProviders || [])],
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
       }));
       scheduleAutoBackup();
-      showToast(`Prestador "${created.name}" cadastrado!`);
+      showToast(
+        created.status === 'pago'
+          ? `Prestador "${created.name}" cadastrado e lançado nas Despesas!`
+          : `Prestador "${created.name}" cadastrado!`
+      );
       return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao cadastrar prestador.', 'err');
@@ -1371,16 +1734,41 @@ export const App: React.FC = () => {
   ): Promise<boolean> => {
     const active = sessionRef.current;
     if (!active || active.role !== 'admin') return false;
+    if (payload.status === 'pago' && (Number(payload.amount) || 0) <= 0) {
+      showToast(
+        'Informe um valor maior que R$ 0,00 antes de marcar o prestador como Pago.',
+        'err'
+      );
+      return false;
+    }
     const targetEmpresaId = active.empresaId || active.company_id;
     const target = (dbRef.current.serviceProviders || []).find((p) => p.id === id);
     if (!target?.dbUuid) return false;
     try {
       const updated = await dbUpdateProvider(targetEmpresaId, target.dbUuid, payload);
+      const competence = (updated.dueDate || toISODate()).slice(0, 7);
+      const day =
+        updated.paymentDay || Number((updated.dueDate || '').slice(8, 10)) || 5;
+      const dataVencimento = resolveMonthPaymentDate(competence, day);
+      const syncRes = await dbSyncCollaboratorExpense(targetEmpresaId, {
+        origemTipo: 'prestador',
+        origemId: target.dbUuid,
+        competencia: competence,
+        isPaid: updated.status === 'pago',
+        nome: updated.name,
+        subtitulo: updated.service,
+        valor: updated.amount,
+        formaPagamento: updated.paymentModality || 'pix',
+        dataVencimento,
+        dataPagamento: updated.status === 'pago' ? toISODate() : undefined,
+      });
+
       setDb((prev) => ({
         ...prev,
         serviceProviders: (prev.serviceProviders || []).map((p) =>
           p.id === id ? updated : p
         ),
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
       }));
       scheduleAutoBackup();
       showToast('Prestador atualizado!');
@@ -1398,10 +1786,18 @@ export const App: React.FC = () => {
     const target = (dbRef.current.serviceProviders || []).find((p) => p.id === id);
     if (!target?.dbUuid) return;
     try {
+      const removedExpenseIds = await dbSoftDeleteCollaboratorLinkedExpenses(
+        targetEmpresaId,
+        'prestador',
+        target.dbUuid
+      );
       await dbSoftDeleteProvider(targetEmpresaId, target.dbUuid);
       setDb((prev) => ({
         ...prev,
         serviceProviders: (prev.serviceProviders || []).filter((p) => p.id !== id),
+        despesas: mergeSyncedExpenses(prev.despesas, {
+          removedIds: removedExpenseIds,
+        }),
       }));
       scheduleAutoBackup();
       showToast('Prestador removido!');
@@ -1415,16 +1811,52 @@ export const App: React.FC = () => {
   ): Promise<boolean> => {
     const active = sessionRef.current;
     if (!active || active.role !== 'admin') return false;
+    if (payload.paymentStatus === 'pago' && (Number(payload.salary) || 0) <= 0) {
+      showToast(
+        'Informe um salário maior que R$ 0,00 antes de marcar como Pago.',
+        'err'
+      );
+      return false;
+    }
     const targetEmpresaId = active.empresaId || active.company_id;
     try {
       const code = getNextPayrollEmployeeId(dbRef.current);
       const created = await dbCreatePayrollEmployee(targetEmpresaId, code, payload);
+      const competence = (
+        created.paidCompetence ||
+        payload.paidCompetence ||
+        toISODate().slice(0, 7)
+      ).slice(0, 7);
+      const dataVencimento = resolveMonthPaymentDate(
+        competence,
+        created.paymentDay || 5
+      );
+      const syncRes = created.dbUuid
+        ? await dbSyncCollaboratorExpense(targetEmpresaId, {
+            origemTipo: 'funcionario',
+            origemId: created.dbUuid,
+            competencia: competence,
+            isPaid: created.paymentStatus === 'pago',
+            nome: created.name,
+            subtitulo: created.roleTitle,
+            valor: created.salary,
+            formaPagamento: created.paymentModality || 'pix',
+            dataVencimento,
+            dataPagamento: created.paidAt || toISODate(),
+          })
+        : { removedIds: [] };
+
       setDb((prev) => ({
         ...prev,
         payrollEmployees: [created, ...(prev.payrollEmployees || [])],
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
       }));
       scheduleAutoBackup();
-      showToast(`Funcionário "${created.name}" cadastrado!`);
+      showToast(
+        created.paymentStatus === 'pago'
+          ? `Funcionário "${created.name}" cadastrado e salário lançado nas Despesas!`
+          : `Funcionário "${created.name}" cadastrado!`
+      );
       return true;
     } catch (err: any) {
       showToast(err?.message || 'Erro ao cadastrar funcionário.', 'err');
@@ -1438,6 +1870,13 @@ export const App: React.FC = () => {
   ): Promise<boolean> => {
     const active = sessionRef.current;
     if (!active || active.role !== 'admin') return false;
+    if (payload.paymentStatus === 'pago' && (Number(payload.salary) || 0) <= 0) {
+      showToast(
+        'Informe um salário maior que R$ 0,00 antes de marcar como Pago.',
+        'err'
+      );
+      return false;
+    }
     const targetEmpresaId = active.empresaId || active.company_id;
     const target = (dbRef.current.payrollEmployees || []).find((e) => e.id === id);
     if (!target?.dbUuid) return false;
@@ -1447,11 +1886,35 @@ export const App: React.FC = () => {
         target.dbUuid,
         payload
       );
+      const competence = (
+        payload.paidCompetence ||
+        updated.paidCompetence ||
+        target.paidCompetence ||
+        toISODate().slice(0, 7)
+      ).slice(0, 7);
+      const dataVencimento = resolveMonthPaymentDate(
+        competence,
+        updated.paymentDay || 5
+      );
+      const syncRes = await dbSyncCollaboratorExpense(targetEmpresaId, {
+        origemTipo: 'funcionario',
+        origemId: target.dbUuid,
+        competencia: competence,
+        isPaid: updated.paymentStatus === 'pago',
+        nome: updated.name,
+        subtitulo: updated.roleTitle,
+        valor: updated.salary,
+        formaPagamento: updated.paymentModality || 'pix',
+        dataVencimento,
+        dataPagamento: updated.paidAt || toISODate(),
+      });
+
       setDb((prev) => ({
         ...prev,
         payrollEmployees: (prev.payrollEmployees || []).map((e) =>
           e.id === id ? updated : e
         ),
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
       }));
       scheduleAutoBackup();
       showToast('Funcionário atualizado!');
@@ -1469,17 +1932,164 @@ export const App: React.FC = () => {
     const target = (dbRef.current.payrollEmployees || []).find((e) => e.id === id);
     if (!target?.dbUuid) return;
     try {
+      const removedExpenseIds = await dbSoftDeleteCollaboratorLinkedExpenses(
+        targetEmpresaId,
+        'funcionario',
+        target.dbUuid
+      );
       await dbSoftDeletePayrollEmployee(targetEmpresaId, target.dbUuid);
       setDb((prev) => ({
         ...prev,
         payrollEmployees: (prev.payrollEmployees || []).filter(
           (e) => e.id !== id
         ),
+        despesas: mergeSyncedExpenses(prev.despesas, {
+          removedIds: removedExpenseIds,
+        }),
       }));
       scheduleAutoBackup();
       showToast('Funcionário removido!');
     } catch (err: any) {
       showToast(err?.message || 'Erro ao remover funcionário.', 'err');
+    }
+  };
+
+  const handleToggleProviderPayment = async (
+    provider: ServiceProviderRecord,
+    targetStatus: 'pago' | 'pendente',
+    competenceMonth: string
+  ): Promise<void> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin' || !provider.dbUuid) return;
+    const isPaid = targetStatus === 'pago';
+    if (isPaid && (Number(provider.amount) || 0) <= 0) {
+      showToast(
+        'Informe um valor maior que R$ 0,00 antes de marcar como Pago.',
+        'err'
+      );
+      return;
+    }
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const cleanComp = (competenceMonth || toISODate().slice(0, 7)).slice(0, 7);
+    const day =
+      provider.paymentDay || Number((provider.dueDate || '').slice(8, 10)) || 5;
+    const dataVencimento = resolveMonthPaymentDate(cleanComp, day);
+    const today = toISODate();
+
+    try {
+      const syncRes = await dbSyncCollaboratorExpense(targetEmpresaId, {
+        origemTipo: 'prestador',
+        origemId: provider.dbUuid,
+        competencia: cleanComp,
+        isPaid,
+        nome: provider.name,
+        subtitulo: provider.service,
+        valor: provider.amount,
+        formaPagamento: provider.paymentModality || 'pix',
+        dataVencimento,
+        dataPagamento: isPaid ? today : undefined,
+      });
+
+      const updated = await dbUpdateProvider(targetEmpresaId, provider.dbUuid, {
+        name: provider.name,
+        service: provider.service,
+        amount: provider.amount,
+        paymentModality: provider.paymentModality || 'pix',
+        dueDate: dataVencimento,
+        paymentDay: day,
+        status: targetStatus,
+      });
+
+      setDb((prev) => ({
+        ...prev,
+        serviceProviders: (prev.serviceProviders || []).map((p) =>
+          p.id === provider.id ? updated : p
+        ),
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
+      }));
+      scheduleAutoBackup();
+      showToast(
+        isPaid
+          ? `Pagamento de "${provider.name}" (${cleanComp}) lançado nas Despesas!`
+          : `Pagamento de "${provider.name}" (${cleanComp}) estornado para Pendente.`
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message || 'Erro ao atualizar status de pagamento do prestador.',
+        'err'
+      );
+    }
+  };
+
+  const handleTogglePayrollPayment = async (
+    employee: PayrollEmployeeRecord,
+    targetStatus: 'pago' | 'pendente',
+    competenceMonth: string
+  ): Promise<void> => {
+    const active = sessionRef.current;
+    if (!active || active.role !== 'admin' || !employee.dbUuid) return;
+    const isPaid = targetStatus === 'pago';
+    if (isPaid && (Number(employee.salary) || 0) <= 0) {
+      showToast(
+        'Informe um salário maior que R$ 0,00 antes de marcar como Pago.',
+        'err'
+      );
+      return;
+    }
+    const targetEmpresaId = active.empresaId || active.company_id;
+    const cleanComp = (competenceMonth || toISODate().slice(0, 7)).slice(0, 7);
+    const day = employee.paymentDay || 5;
+    const dataVencimento = resolveMonthPaymentDate(cleanComp, day);
+    const today = toISODate();
+
+    try {
+      const syncRes = await dbSyncCollaboratorExpense(targetEmpresaId, {
+        origemTipo: 'funcionario',
+        origemId: employee.dbUuid,
+        competencia: cleanComp,
+        isPaid,
+        nome: employee.name,
+        subtitulo: employee.roleTitle,
+        valor: employee.salary,
+        formaPagamento: employee.paymentModality || 'pix',
+        dataVencimento,
+        dataPagamento: isPaid ? today : undefined,
+      });
+
+      const updated = await dbUpdatePayrollEmployee(
+        targetEmpresaId,
+        employee.dbUuid,
+        {
+          name: employee.name,
+          roleTitle: employee.roleTitle,
+          salary: employee.salary,
+          admissionDate: employee.admissionDate,
+          paymentDay: day,
+          paymentModality: employee.paymentModality || 'pix',
+          paymentStatus: targetStatus,
+          paidAt: isPaid ? today : undefined,
+          paidCompetence: isPaid ? cleanComp : undefined,
+        }
+      );
+
+      setDb((prev) => ({
+        ...prev,
+        payrollEmployees: (prev.payrollEmployees || []).map((e) =>
+          e.id === employee.id ? updated : e
+        ),
+        despesas: mergeSyncedExpenses(prev.despesas, syncRes),
+      }));
+      scheduleAutoBackup();
+      showToast(
+        isPaid
+          ? `Salário de "${employee.name}" (${cleanComp}) lançado nas Despesas!`
+          : `Salário de "${employee.name}" (${cleanComp}) estornado para Pendente.`
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message || 'Erro ao atualizar status de pagamento do funcionário.',
+        'err'
+      );
     }
   };
 
@@ -1835,7 +2445,10 @@ export const App: React.FC = () => {
               onSelectSection={handleSelectSection}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              onOpenNewOrder={() => setIsNewModalOpen(true)}
+              onOpenNewOrder={() => {
+                setEditingOrder(null);
+                setIsNewModalOpen(true);
+              }}
               tenantName={session.companyName}
               userRole={session.role}
               isSuperAdmin={Boolean(session.isSuperAdmin)}
@@ -1904,7 +2517,10 @@ export const App: React.FC = () => {
                   stock={db.stock || []}
                   financials={financials}
                   onNavigate={handleSelectSection}
-                  onOpenNewOrder={() => setIsNewModalOpen(true)}
+                  onOpenNewOrder={() => {
+                    setEditingOrder(null);
+                    setIsNewModalOpen(true);
+                  }}
                   onSelectCompany={(id) => setSelectedCompanyId(id)}
                 />
               )}
@@ -1939,6 +2555,10 @@ export const App: React.FC = () => {
                   pendingOrderIds={pendingOrderIds}
                   moveError={moveError}
                   onMoveStage={handleMoveStage}
+                  onEditOrder={(order) => {
+                    setEditingOrder(order);
+                    setIsNewModalOpen(true);
+                  }}
                   onDeleteOrder={handleDeleteOrder}
                   onQuickRegisterDelivery={handleQuickRegisterDelivery}
                 />
@@ -1955,6 +2575,7 @@ export const App: React.FC = () => {
                   investments={db.investments || []}
                   onTogglePaid={handleTogglePaid}
                   onEmitBilling30d={handleEmitBilling30d}
+                  onUpdateOrderFinance={handleUpdateOrderFinance}
                   onDeleteOrder={handleDeleteOrder}
                   onCreateExpense={handleCreateExpense}
                   onUpdateExpense={handleUpdateExpense}
@@ -1965,6 +2586,8 @@ export const App: React.FC = () => {
                   onAddPayrollEmployee={handleAddPayrollEmployee}
                   onUpdatePayrollEmployee={handleUpdatePayrollEmployee}
                   onDeletePayrollEmployee={handleDeletePayrollEmployee}
+                  onToggleProviderPayment={handleToggleProviderPayment}
+                  onTogglePayrollPayment={handleTogglePayrollPayment}
                   onAddInvestment={handleAddInvestment}
                   onUpdateInvestment={handleUpdateInvestment}
                   onDeleteInvestment={handleDeleteInvestment}
@@ -2105,7 +2728,10 @@ export const App: React.FC = () => {
         {session.role === 'admin' && (
           <button
             type="button"
-            onClick={() => setIsNewModalOpen(true)}
+            onClick={() => {
+              setEditingOrder(null);
+              setIsNewModalOpen(true);
+            }}
             className="md:hidden fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-20 min-h-[48px] inline-flex items-center gap-2 px-5 py-3 rounded-full font-bold text-sm bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 text-white border border-white/40 shadow-2xl shadow-indigo-600/40 transition-all cursor-pointer"
           >
             <span>Nova OS</span>
@@ -2116,10 +2742,15 @@ export const App: React.FC = () => {
         {session.role === 'admin' && (
           <FastEntryModal
             isOpen={isNewModalOpen}
-            onClose={() => setIsNewModalOpen(false)}
+            onClose={() => {
+              setIsNewModalOpen(false);
+              setEditingOrder(null);
+            }}
             companies={db.companies}
             nextOrderId={nextOrderId}
+            editingOrder={editingOrder}
             onSaveOrder={handleCreateOrderFull}
+            onUpdateOrder={handleUpdateOrderFull}
           />
         )}
       </div>

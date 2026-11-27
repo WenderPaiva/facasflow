@@ -5,6 +5,7 @@ import {
   CalendarClock,
   Check,
   Copy,
+  Edit3,
   FileWarning,
   Loader2,
   MessageCircle,
@@ -15,11 +16,15 @@ import {
   Trash2,
   TrendingUp,
   Users,
+  Wallet,
+  X,
 } from 'lucide-react';
 import {
   DieOrder,
   ExpenseRecord,
   InvestmentRecord,
+  OrderFinanceUpdatePayload,
+  PaymentModality,
   PaymentStatus,
   PayrollEmployeeRecord,
   ServiceProviderRecord,
@@ -30,9 +35,14 @@ import {
   buildWhatsAppBillingUrl,
   FinancialBreakdown,
   formatBRL,
+  formatCurrencyMask,
   formatDateBR,
   getDaysDiff,
+  getTodayGoiasISO,
+  normalizeOrderPaymentStatus,
+  parseCurrencyMask,
   PAYMENT_MODALITY_META,
+  roundCurrencyBRL,
 } from '../utils/financeEngine';
 import { CollaboratorsSubsection } from './CollaboratorsSubsection';
 import { ExpensesSection } from './ExpensesSection';
@@ -56,6 +66,10 @@ interface FinanceAnalyticsSectionProps {
   investments: InvestmentRecord[];
   onTogglePaid: (orderId: string) => Promise<void> | void;
   onEmitBilling30d: (orderId: string) => Promise<void> | void;
+  onUpdateOrderFinance?: (
+    orderId: string,
+    payload: OrderFinanceUpdatePayload
+  ) => Promise<boolean | void> | void;
   onDeleteOrder: (orderId: string) => Promise<void> | void;
   onCreateExpense: (payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
   onUpdateExpense: (id: string, payload: ExpenseDraftPayload) => Promise<ExpenseRecord>;
@@ -68,6 +82,11 @@ interface FinanceAnalyticsSectionProps {
     payload: Omit<ServiceProviderRecord, 'id' | 'company_id' | 'updatedAt'>
   ) => Promise<boolean | void> | void;
   onDeleteProvider: (id: string) => Promise<void> | void;
+  onToggleProviderPayment?: (
+    provider: ServiceProviderRecord,
+    targetStatus: 'pago' | 'pendente',
+    competenceMonth: string
+  ) => Promise<void> | void;
   onAddPayrollEmployee: (
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
   ) => Promise<boolean | void> | void;
@@ -76,6 +95,11 @@ interface FinanceAnalyticsSectionProps {
     payload: Omit<PayrollEmployeeRecord, 'id' | 'company_id' | 'updatedAt'>
   ) => Promise<boolean | void> | void;
   onDeletePayrollEmployee: (id: string) => Promise<void> | void;
+  onTogglePayrollPayment?: (
+    employee: PayrollEmployeeRecord,
+    targetStatus: 'pago' | 'pendente',
+    competenceMonth: string
+  ) => Promise<void> | void;
   onAddInvestment: (
     payload: Omit<InvestmentRecord, 'id' | 'company_id' | 'updatedAt'>
   ) => Promise<boolean | void> | void;
@@ -96,6 +120,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
   investments,
   onTogglePaid,
   onEmitBilling30d,
+  onUpdateOrderFinance,
   onDeleteOrder,
   onCreateExpense,
   onUpdateExpense,
@@ -103,9 +128,11 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
   onAddProvider,
   onUpdateProvider,
   onDeleteProvider,
+  onToggleProviderPayment,
   onAddPayrollEmployee,
   onUpdatePayrollEmployee,
   onDeletePayrollEmployee,
+  onTogglePayrollPayment,
   onAddInvestment,
   onUpdateInvestment,
   onDeleteInvestment,
@@ -115,6 +142,15 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [hoveredModality, setHoveredModality] = useState<string | null>(null);
   const [busyOrderAction, setBusyOrderAction] = useState<string | null>(null);
+  const [editingFinanceOrder, setEditingFinanceOrder] = useState<DieOrder | null>(null);
+  const [finAmount, setFinAmount] = useState(0);
+  const [finModality, setFinModality] = useState<PaymentModality>('boleto');
+  const [finStatus, setFinStatus] = useState<PaymentStatus>('nao_pago');
+  const [finDueDate, setFinDueDate] = useState(() => getTodayGoiasISO());
+  const [finPaidAt, setFinPaidAt] = useState('');
+  const [finNotes, setFinNotes] = useState('');
+  const [isSavingFinance, setIsSavingFinance] = useState(false);
+  const [financeError, setFinanceError] = useState<string | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -125,10 +161,88 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
     };
   }, []);
 
+  const paidExpensesTotal = useMemo(
+    () =>
+      despesas.reduce((sum, d) => {
+        if (d.deleted_at || d.status !== 'pago') return sum;
+        return sum + (Number(d.valor) || 0);
+      }, 0),
+    [despesas]
+  );
+
+  const generalCashBalance = financials.paidTotal - paidExpensesTotal;
+
+  const openFinanceEditModal = (order: DieOrder) => {
+    const today = getTodayGoiasISO();
+    const initialStatus: PaymentStatus =
+      order.paymentStatus === 'vencido' ? 'a_receber' : order.paymentStatus;
+    setEditingFinanceOrder(order);
+    setFinAmount(Number(order.amount) || 0);
+    setFinModality(order.paymentModality || 'boleto');
+    setFinStatus(initialStatus);
+    setFinDueDate(order.dueDate ? order.dueDate.slice(0, 10) : today);
+    setFinPaidAt(
+      order.paidAt
+        ? order.paidAt.slice(0, 10)
+        : initialStatus === 'pago'
+          ? today
+          : ''
+    );
+    setFinNotes(order.financialNotes || '');
+    setFinanceError(null);
+    setIsSavingFinance(false);
+  };
+
+  const closeFinanceEditModal = () => {
+    if (isSavingFinance) return;
+    setEditingFinanceOrder(null);
+    setFinanceError(null);
+  };
+
+  const handleSaveFinance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSavingFinance || !editingFinanceOrder) return;
+    const today = getTodayGoiasISO();
+    const payload: OrderFinanceUpdatePayload = {
+      amount: roundCurrencyBRL(finAmount),
+      paymentModality: finModality,
+      paymentStatus: finStatus,
+      dueDate: finDueDate || today,
+      paidAt: finStatus === 'pago' ? finPaidAt || today : null,
+      financialNotes: finNotes.trim() ? finNotes.trim() : null,
+    };
+
+    setIsSavingFinance(true);
+    setFinanceError(null);
+    try {
+      if (onUpdateOrderFinance) {
+        const result = await onUpdateOrderFinance(editingFinanceOrder.id, payload);
+        if (result === false) {
+          setFinanceError('Não foi possível salvar os dados financeiros desta OS.');
+          return;
+        }
+      }
+      setEditingFinanceOrder(null);
+    } catch (err) {
+      setFinanceError(
+        err instanceof Error
+          ? err.message
+          : 'Erro ao atualizar valores financeiros desta OS.'
+      );
+    } finally {
+      setIsSavingFinance(false);
+    }
+  };
+
+  const normalizedOrders = useMemo(
+    () => orders.map(normalizeOrderPaymentStatus),
+    [orders]
+  );
+
   const filteredOrders = useMemo(() => {
-    if (statusFilter === 'todos') return orders;
-    return orders.filter((o) => o.paymentStatus === statusFilter);
-  }, [orders, statusFilter]);
+    if (statusFilter === 'todos') return normalizedOrders;
+    return normalizedOrders.filter((o) => o.paymentStatus === statusFilter);
+  }, [normalizedOrders, statusFilter]);
 
   const handleCopyPix = async (order: DieOrder) => {
     const text = buildPixClipboardSnippet(order);
@@ -247,12 +361,15 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
         <CollaboratorsSubsection
           providers={serviceProviders}
           payrollEmployees={payrollEmployees}
+          despesas={despesas}
           onAddProvider={onAddProvider}
           onUpdateProvider={onUpdateProvider}
           onDeleteProvider={onDeleteProvider}
+          onToggleProviderPayment={onToggleProviderPayment}
           onAddPayrollEmployee={onAddPayrollEmployee}
           onUpdatePayrollEmployee={onUpdatePayrollEmployee}
           onDeletePayrollEmployee={onDeletePayrollEmployee}
+          onTogglePayrollPayment={onTogglePayrollPayment}
         />
       )}
 
@@ -268,7 +385,7 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
       {activeTab === 'visao' && (
         <>
           {/* 1. MÉTRICAS SUPERIORES */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
             <button
               type="button"
               onClick={() =>
@@ -345,6 +462,36 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                 {financials.unbilledCount} facas entregues sem cobrança
               </span>
             </button>
+
+            <div className="liquid-glass rounded-[28px] p-6 text-left flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">
+                  4. Saldo Geral em Caixa
+                </span>
+                <span
+                  className={`p-2 rounded-2xl border ${
+                    generalCashBalance >= 0
+                      ? 'bg-emerald-500/15 text-emerald-700 border-emerald-300/60'
+                      : 'bg-rose-500/15 text-rose-700 border-rose-300/60'
+                  }`}
+                >
+                  <Wallet className="w-4 h-4" />
+                </span>
+              </div>
+              <p
+                className={`text-3xl font-black tracking-tight mt-3 ${
+                  generalCashBalance >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                }`}
+              >
+                {formatBRL(generalCashBalance)}
+              </p>
+              <span className="text-xs font-medium text-slate-600 mt-1 block">
+                Entradas Quitadas{' '}
+                <strong className="text-emerald-700">{formatBRL(financials.paidTotal)}</strong>{' '}
+                × Saídas Pagas{' '}
+                <strong className="text-rose-700">{formatBRL(paidExpensesTotal)}</strong>
+              </span>
+            </div>
           </div>
 
           {/* 2. GRÁFICO DE FORMAS DE PAGAMENTO */}
@@ -544,6 +691,11 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                         <span className="text-slate-800 font-semibold break-words">
                           {order.toolDescription}
                         </span>
+                        {order.financialNotes?.trim() && (
+                          <span className="text-[11px] font-medium text-indigo-700/90 block mt-0.5 break-words">
+                            Obs.: {order.financialNotes}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
@@ -654,6 +806,17 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                         <button
                           type="button"
                           disabled={Boolean(busyOrderAction)}
+                          onClick={() => openFinanceEditModal(order)}
+                          title="Editar valor, status ou observação financeira"
+                          aria-label="Editar valor, status ou observação financeira"
+                          className="btn-compact w-9 h-9 rounded-full bg-white/60 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-600 hover:text-indigo-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={Boolean(busyOrderAction)}
                           onClick={() =>
                             void runOrderAction(`del:${order.id}`, () =>
                               onDeleteOrder(order.id)
@@ -718,6 +881,14 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                             <span className="text-slate-800 font-semibold block truncate">
                               {order.toolDescription}
                             </span>
+                            {order.financialNotes?.trim() && (
+                              <span
+                                className="text-[11px] font-medium text-indigo-700/90 block truncate mt-0.5"
+                                title={order.financialNotes}
+                              >
+                                Obs.: {order.financialNotes}
+                              </span>
+                            )}
                           </td>
 
                           <td className="py-4 px-4 whitespace-nowrap">
@@ -846,6 +1017,17 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
                               <button
                                 type="button"
                                 disabled={Boolean(busyOrderAction)}
+                                onClick={() => openFinanceEditModal(order)}
+                                className="btn-compact w-8 h-8 rounded-full bg-white/60 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-600 hover:text-indigo-700 border border-white/75 flex items-center justify-center transition cursor-pointer shrink-0"
+                                title="Editar valor, status ou observação financeira"
+                                aria-label="Editar valor, status ou observação financeira"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={Boolean(busyOrderAction)}
                                 onClick={() =>
                                   void runOrderAction(`del:${order.id}`, () =>
                                     onDeleteOrder(order.id)
@@ -872,6 +1054,208 @@ export const FinanceAnalyticsSection: React.FC<FinanceAnalyticsSectionProps> = (
             </div>
           </div>
         </>
+      )}
+
+      {/* Modal Liquid Glass: Edição Financeira da OS */}
+      {editingFinanceOrder && (
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-slate-900/35 backdrop-blur-md p-0 md:p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Editar financeiro da ${editingFinanceOrder.id}`}
+            className="w-full md:max-w-lg max-h-[92dvh] rounded-t-[28px] md:rounded-[30px] liquid-glass bg-white/75 shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Header */}
+            <div className="px-5 pt-5 pb-3 border-b border-white/60 flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-sky-400 p-[1.5px] shadow-md flex items-center justify-center shrink-0">
+                  <div className="w-full h-full bg-white/90 rounded-[10px] flex items-center justify-center">
+                    <Edit3 className="w-4 h-4 text-indigo-600" />
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-extrabold text-slate-900">
+                      Editar Financeiro
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-300/60 font-mono text-xs font-bold text-indigo-800">
+                      {editingFinanceOrder.id}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-600 truncate">
+                    {editingFinanceOrder.companyName} • {editingFinanceOrder.toolDescription}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeFinanceEditModal}
+                disabled={isSavingFinance}
+                aria-label="Fechar modal"
+                className="min-h-[44px] min-w-[44px] rounded-full liquid-glass-pill text-slate-700 hover:text-slate-950 transition inline-flex items-center justify-center cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFinance} className="flex flex-col flex-1 min-h-0">
+              <div className="p-5 space-y-3.5 overflow-y-auto flex-1">
+                {financeError && (
+                  <div className="px-3.5 py-2.5 rounded-2xl bg-rose-500/15 border border-rose-300/70 text-xs font-bold text-rose-800">
+                    {financeError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Valor Final (R$)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-600">
+                        R$
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        value={formatCurrencyMask(finAmount)}
+                        onChange={(e) => setFinAmount(parseCurrencyMask(e.target.value))}
+                        className="liquid-glass-pill w-full min-h-[44px] pl-9 pr-3.5 py-2.5 text-base rounded-2xl text-slate-900 text-right font-mono font-bold focus:ring-2 focus:ring-indigo-500/50 outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Status Financeiro
+                    </label>
+                    <select
+                      value={finStatus}
+                      onChange={(e) => {
+                        const next = e.target.value as PaymentStatus;
+                        setFinStatus(next);
+                        if (next === 'pago' && !finPaidAt) {
+                          setFinPaidAt(getTodayGoiasISO());
+                        }
+                      }}
+                      className="liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 focus:ring-2 focus:ring-indigo-500/50 outline-none transition"
+                    >
+                      <option value="nao_pago">Não Pago</option>
+                      <option value="a_receber">A Receber</option>
+                      <option value="pago">Pago</option>
+                      <option value="sem_nota">Entregue sem Nota</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Modalidade de Pagamento
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {(Object.keys(PAYMENT_MODALITY_META) as PaymentModality[]).map((mod) => {
+                      const meta = PAYMENT_MODALITY_META[mod];
+                      const selected = finModality === mod;
+                      return (
+                        <button
+                          type="button"
+                          key={mod}
+                          onClick={() => setFinModality(mod)}
+                          className={`min-h-[44px] py-2 px-3 rounded-2xl text-xs font-bold border text-left flex items-center justify-between transition cursor-pointer ${
+                            selected
+                              ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-white/40 shadow-md'
+                              : 'liquid-glass-pill text-slate-700'
+                          }`}
+                        >
+                          <span className="truncate">{meta.short}</span>
+                          {selected && <Check className="w-3.5 h-3.5 shrink-0 ml-1" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div
+                  className={`grid grid-cols-1 ${
+                    finStatus === 'pago' ? 'sm:grid-cols-2' : ''
+                  } gap-3`}
+                >
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Data de Vencimento
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={finDueDate}
+                      onChange={(e) => setFinDueDate(e.target.value)}
+                      className="liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 font-mono focus:ring-2 focus:ring-indigo-500/50 outline-none transition"
+                    />
+                  </div>
+
+                  {finStatus === 'pago' && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Data de Pagamento
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={finPaidAt}
+                        onChange={(e) => setFinPaidAt(e.target.value)}
+                        className="liquid-glass-pill w-full min-h-[44px] px-3.5 py-2.5 text-base rounded-2xl text-slate-900 font-mono focus:ring-2 focus:ring-indigo-500/50 outline-none transition"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Observações Financeiras{' '}
+                    <span className="font-medium text-slate-500">(opcional)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={finNotes}
+                    onChange={(e) => setFinNotes(e.target.value)}
+                    placeholder="Ex: Desconto comercial, acordo de prazo, ajuste de valor..."
+                    className="liquid-glass-pill w-full px-3.5 py-2.5 text-sm rounded-2xl text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 outline-none transition resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-white/60 bg-white/45 shrink-0 flex items-center justify-end gap-2 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <button
+                  type="button"
+                  onClick={closeFinanceEditModal}
+                  disabled={isSavingFinance}
+                  className="min-h-[44px] px-4 py-2.5 rounded-full text-xs font-bold liquid-glass-pill text-slate-700 hover:text-slate-950 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingFinance}
+                  className="flex-1 sm:flex-initial min-h-[44px] px-6 py-2.5 rounded-full text-sm font-bold bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed text-white border border-white/40 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+                >
+                  {isSavingFinance ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 stroke-[2.5]" />
+                      <span>Salvar Financeiro</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

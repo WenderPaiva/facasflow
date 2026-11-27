@@ -180,6 +180,29 @@ export interface DieOrder {
   createdAt: string; // YYYY-MM-DD
   dueDate: string; // YYYY-MM-DD
   paidAt?: string;
+  financialNotes?: string;
+}
+
+export interface OrderUpsertPayload {
+  companyId: string;
+  companyName: string;
+  companyPhone: string;
+  toolDescription: string;
+  bladeMeters?: number | null;
+  woodMm?: 15 | 18 | 22 | null;
+  dueDate?: string;
+  amount: number;
+  paymentModality: PaymentModality;
+  stage: ProductionStage;
+}
+
+export interface OrderFinanceUpdatePayload {
+  amount: number;
+  paymentModality: PaymentModality;
+  paymentStatus: PaymentStatus;
+  dueDate: string;
+  paidAt?: string | null;
+  financialNotes?: string | null;
 }
 
 export interface DeliveryRecord {
@@ -216,8 +239,9 @@ export type ExpenseCategoryKey =
   | 'energia'
   | 'internet'
   | 'alimentacao'
-  | 'combustivel'
+  | 'transportes'
   | 'manutencao'
+  | 'custo_depreciacao'
   | 'contador'
   | 'marketing'
   | 'financiamento'
@@ -227,6 +251,8 @@ export type ExpenseCategoryKey =
   | 'impostos'
   | 'flow_dashboard'
   | 'taxas_bancarias'
+  | 'folha_colaboradores'
+  | 'prestadores_servico'
   | 'outros';
 
 export type ExpenseStatus = 'pendente' | 'pago' | 'cancelado';
@@ -252,6 +278,9 @@ export interface ExpenseRecord {
   forma_pagamento: ExpensePaymentMethod;
   fornecedor?: string;
   observacao?: string;
+  origem_tipo?: 'funcionario' | 'prestador' | null;
+  origem_id?: string | null;
+  competencia_referencia?: string | null;
   created_by?: string;
   updated_by?: string;
   created_at?: string;
@@ -312,6 +341,7 @@ export interface ServiceProviderRecord {
   amount: number;
   paymentModality: PaymentModality;
   dueDate: string; // YYYY-MM-DD
+  paymentDay?: number; // 1..31
   status: ServiceProviderStatus;
   updatedAt: string;
 }
@@ -324,6 +354,11 @@ export interface PayrollEmployeeRecord {
   roleTitle: string;
   salary: number;
   admissionDate: string; // YYYY-MM-DD
+  paymentDay: number; // 1..31
+  paymentStatus: 'pendente' | 'pago';
+  paymentModality: PaymentModality;
+  paidAt?: string;
+  paidCompetence?: string; // YYYY-MM
   updatedAt: string;
 }
 

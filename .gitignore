@@ -27,3 +27,4 @@ test-results/
 screenshots/
 *.png
 *.jpg
+.system_generated/

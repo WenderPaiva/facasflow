@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Edit3,
   Kanban,
   RotateCcw,
   Trash2,
@@ -28,6 +29,7 @@ interface ProductionKanbanProps {
   moveError?: string | null;
   onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
   onQuickRegisterDelivery: (order: DieOrder) => void;
+  onEditOrder?: (order: DieOrder) => void;
   onDeleteOrder: (orderId: string) => void;
 }
 
@@ -41,6 +43,7 @@ interface OrderKanbanCardProps {
   onDragEnd: () => void;
   onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
   onQuickRegisterDelivery: (order: DieOrder) => void;
+  onEditOrder?: (order: DieOrder) => void;
   onDeleteOrder: (orderId: string) => void;
 }
 
@@ -59,6 +62,7 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
     onDragEnd,
     onMoveStage,
     onQuickRegisterDelivery,
+    onEditOrder,
     onDeleteOrder,
   }) => {
     const prevStage = getPrevStage(order.stage);
@@ -66,6 +70,8 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
     const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
     const isFinalizingStep = nextStage === 'faca_pronta';
     const canDeleteOrder = userRole !== 'operador' && userRole !== 'cliente';
+    const canEditOrder =
+      userRole !== 'operador' && userRole !== 'cliente' && Boolean(onEditOrder);
 
     return (
       <div
@@ -104,6 +110,18 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
                 <ChevronDown className="w-3 h-3" />
               )}
             </button>
+            {canEditOrder && (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => onEditOrder?.(order)}
+                className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-500 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                title="Editar esta OS"
+                aria-label="Editar esta OS"
+              >
+                <Edit3 className="w-3 h-3" />
+              </button>
+            )}
             {canDeleteOrder && (
               <button
                 type="button"
@@ -142,6 +160,21 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
               <strong>Pagamento:</strong>{' '}
               {order.paymentStatus === 'pago' ? 'Pago' : 'Não Pago'}
             </div>
+            {order.bladeMeters !== undefined && order.bladeMeters !== null && (
+              <div>
+                <strong>Lâmina:</strong> {order.bladeMeters} m
+              </div>
+            )}
+            {order.woodMm && (
+              <div>
+                <strong>Madeira:</strong> {order.woodMm} mm
+              </div>
+            )}
+            {order.financialNotes?.trim() && (
+              <div className="break-words">
+                <strong>Obs. Financeira:</strong> {order.financialNotes}
+              </div>
+            )}
           </div>
         )}
 
@@ -222,6 +255,7 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
   moveError,
   onMoveStage,
   onQuickRegisterDelivery,
+  onEditOrder,
   onDeleteOrder,
 }) => {
   const [activeView, setActiveView] = useState<'producao' | 'prontas'>('producao');
@@ -233,6 +267,8 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
 
   const pendingSet = useMemo(() => new Set(pendingOrderIds), [pendingOrderIds]);
   const canDeleteOrder = userRole !== 'operador' && userRole !== 'cliente';
+  const canEditOrder =
+    userRole !== 'operador' && userRole !== 'cliente' && Boolean(onEditOrder);
 
   const activeOrders = useMemo(
     () => orders.filter((o) => o.stage !== 'faca_pronta'),
@@ -427,6 +463,7 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                         onDragEnd={handleDragEnd}
                         onMoveStage={onMoveStage}
                         onQuickRegisterDelivery={onQuickRegisterDelivery}
+                        onEditOrder={onEditOrder}
                         onDeleteOrder={onDeleteOrder}
                       />
                     ))
@@ -521,6 +558,18 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                               <ChevronDown className="w-3.5 h-3.5" />
                             )}
                           </button>
+                          {canEditOrder && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => onEditOrder?.(order)}
+                              className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-500 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
+                              title="Editar esta OS"
+                              aria-label="Editar esta OS"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {canDeleteOrder && (
                             <button
                               type="button"
@@ -556,6 +605,21 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                           <div>
                             <strong>Telefone:</strong> {order.companyPhone || 'Não informado'}
                           </div>
+                          {order.bladeMeters !== undefined && order.bladeMeters !== null && (
+                            <div>
+                              <strong>Lâmina:</strong> {order.bladeMeters} m
+                            </div>
+                          )}
+                          {order.woodMm && (
+                            <div>
+                              <strong>Madeira:</strong> {order.woodMm} mm
+                            </div>
+                          )}
+                          {order.financialNotes?.trim() && (
+                            <div className="break-words">
+                              <strong>Obs. Financeira:</strong> {order.financialNotes}
+                            </div>
+                          )}
                         </div>
                       )}
 

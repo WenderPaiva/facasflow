@@ -35,12 +35,53 @@ import {
   formatDateBR,
   getExpensePeriodRange,
   getTodayGoiasISO,
+  normalizeExpenseCategory,
   parseCurrencyMask,
   roundCurrencyBRL,
   validateExpenseInput,
 } from '../utils/financeEngine';
 import { ExpenseDraftPayload } from '../services/supabaseDataService';
 import { ResponsiveCategoryChart } from './ResponsiveCategoryChart';
+
+export const EXPENSE_CATEGORY_GROUPS: {
+  groupLabel: string;
+  keys: ExpenseCategoryKey[];
+}[] = [
+  {
+    groupLabel: 'Insumos de Produção',
+    keys: ['madeira', 'laminas'],
+  },
+  {
+    groupLabel: 'Instalações, Veículos & Utilidades',
+    keys: [
+      'aluguel',
+      'agua',
+      'energia',
+      'internet',
+      'alimentacao',
+      'transportes',
+      'seguros',
+      'manutencao',
+      'custo_depreciacao',
+    ],
+  },
+  {
+    groupLabel: 'Folha & Prestadores',
+    keys: ['folha_colaboradores', 'prestadores_servico'],
+  },
+  {
+    groupLabel: 'Administrativo, Impostos & Financeiro',
+    keys: [
+      'contador',
+      'marketing',
+      'financiamento',
+      'impostos',
+      'taxas_bancarias',
+      'flow_dashboard',
+      'outros',
+    ],
+  },
+];
 
 interface ExpensesSectionProps {
   expenses: ExpenseRecord[];
@@ -147,7 +188,8 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
   const filteredExpenses = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const list = periodExpenses.filter((exp) => {
-      if (categoryFilter !== 'todas' && exp.categoria !== categoryFilter) {
+      const effCat = normalizeExpenseCategory(exp.categoria);
+      if (categoryFilter !== 'todas' && effCat !== categoryFilter) {
         return false;
       }
       const eff = computeExpenseEffectiveStatus(exp, todayGoiasIso);
@@ -158,7 +200,7 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
         const desc = (exp.descricao || '').toLowerCase();
         const forn = (exp.fornecedor || '').toLowerCase();
         const obs = (exp.observacao || '').toLowerCase();
-        const cat = (EXPENSE_CATEGORY_MAP[exp.categoria]?.label || '').toLowerCase();
+        const cat = (EXPENSE_CATEGORY_MAP[effCat]?.label || '').toLowerCase();
         if (
           !desc.includes(q) &&
           !forn.includes(q) &&
@@ -179,6 +221,10 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
         const sa = computeExpenseEffectiveStatus(a, todayGoiasIso);
         const sb = computeExpenseEffectiveStatus(b, todayGoiasIso);
         cmp = sa.localeCompare(sb, 'pt-BR');
+      } else if (sortField === 'categoria') {
+        const ca = EXPENSE_CATEGORY_MAP[normalizeExpenseCategory(a.categoria)]?.label || '';
+        const cb = EXPENSE_CATEGORY_MAP[normalizeExpenseCategory(b.categoria)]?.label || '';
+        cmp = ca.localeCompare(cb, 'pt-BR');
       } else {
         const va = String((a as any)[sortField] || '');
         const vb = String((b as any)[sortField] || '');
@@ -219,7 +265,7 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
     setEditingId(exp.id);
     const val = roundCurrencyBRL(exp.valor);
     setFormState({
-      categoria: exp.categoria,
+      categoria: normalizeExpenseCategory(exp.categoria),
       descricao: exp.descricao || '',
       valorDisplay: formatCurrencyMask(val),
       valorNum: val,
@@ -553,10 +599,18 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                   className="liquid-glass-input min-h-[44px] px-3 py-2 rounded-xl text-base font-semibold text-slate-900 w-full sm:w-auto"
                 >
                   <option value="todas">Todas as categorias</option>
-                  {EXPENSE_CATEGORIES.map((cat) => (
-                    <option key={cat.key} value={cat.key}>
-                      {cat.label}
-                    </option>
+                  {EXPENSE_CATEGORY_GROUPS.map((grp) => (
+                    <optgroup key={grp.groupLabel} label={grp.groupLabel}>
+                      {grp.keys.map((k) => {
+                        const item = EXPENSE_CATEGORY_MAP[k];
+                        if (!item) return null;
+                        return (
+                          <option key={k} value={k}>
+                            {item.label}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
                   ))}
                 </select>
               </div>
@@ -612,7 +666,8 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
               {filteredExpenses.map((exp) => {
                 const eff = computeExpenseEffectiveStatus(exp, todayGoiasIso);
                 const statusMeta = EXPENSE_STATUS_META[eff];
-                const catMeta = EXPENSE_CATEGORY_MAP[exp.categoria];
+                const catKey = normalizeExpenseCategory(exp.categoria);
+                const catMeta = EXPENSE_CATEGORY_MAP[catKey];
                 const payMeta = EXPENSE_PAYMENT_META[exp.forma_pagamento];
 
                 return (
@@ -622,8 +677,16 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                         <span
                           className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${catMeta?.badgeClass}`}
                         >
-                          {catMeta?.label || exp.categoria}
+                          {catMeta?.label || catKey}
                         </span>
+                        {exp.origem_tipo && (
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/15 text-sky-800 border border-sky-300/60"
+                            title={`Origem: ${exp.origem_tipo === 'funcionario' ? 'Folha de Pagamento' : 'Prestador de Serviço'}`}
+                          >
+                            Vínculo Folha/Prest.
+                          </span>
+                        )}
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${statusMeta?.badgeClass}`}
                         >
@@ -737,7 +800,8 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                   {filteredExpenses.map((exp) => {
                     const eff = computeExpenseEffectiveStatus(exp, todayGoiasIso);
                     const statusMeta = EXPENSE_STATUS_META[eff];
-                    const catMeta = EXPENSE_CATEGORY_MAP[exp.categoria];
+                    const catKey = normalizeExpenseCategory(exp.categoria);
+                    const catMeta = EXPENSE_CATEGORY_MAP[catKey];
                     const payMeta = EXPENSE_PAYMENT_META[exp.forma_pagamento];
 
                     return (
@@ -751,11 +815,21 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                           )}
                         </td>
                         <td className="py-3.5 px-3.5 whitespace-nowrap">
-                          <span
-                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${catMeta?.badgeClass}`}
-                          >
-                            {catMeta?.label || exp.categoria}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${catMeta?.badgeClass}`}
+                            >
+                              {catMeta?.label || catKey}
+                            </span>
+                            {exp.origem_tipo && (
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/15 text-sky-800 border border-sky-300/60"
+                                title={`Origem: ${exp.origem_tipo === 'funcionario' ? 'Folha de Pagamento' : 'Prestador de Serviço'}`}
+                              >
+                                Vínculo Folha/Prest.
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-3.5 max-w-[240px]">
                           <span
@@ -898,10 +972,18 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                     }}
                     className="liquid-glass-input w-full min-h-[44px] px-3 py-2 rounded-xl text-base text-slate-900"
                   >
-                    {EXPENSE_CATEGORIES.map((cat) => (
-                      <option key={cat.key} value={cat.key}>
-                        {cat.label}
-                      </option>
+                    {EXPENSE_CATEGORY_GROUPS.map((grp) => (
+                      <optgroup key={grp.groupLabel} label={grp.groupLabel}>
+                        {grp.keys.map((k) => {
+                          const item = EXPENSE_CATEGORY_MAP[k];
+                          if (!item) return null;
+                          return (
+                            <option key={k} value={k}>
+                              {item.label}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
@@ -1165,7 +1247,7 @@ export const ExpensesSection: React.FC<ExpensesSectionProps> = ({
                 <p className="text-xs text-slate-700 mt-1">
                   Tem certeza que deseja excluir o lançamento{' '}
                   <strong>
-                    {EXPENSE_CATEGORY_MAP[deleteTarget.categoria]?.label}
+                    {EXPENSE_CATEGORY_MAP[normalizeExpenseCategory(deleteTarget.categoria)]?.label || deleteTarget.categoria}
                   </strong>{' '}
                   no valor de <strong>{formatBRL(deleteTarget.valor)}</strong>?
                 </p>

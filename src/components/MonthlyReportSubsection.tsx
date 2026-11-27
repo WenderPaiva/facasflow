@@ -23,6 +23,7 @@ import {
   formatDecimalBR,
   getTodayGoiasISO,
   INVESTMENT_TYPE_META,
+  normalizeExpenseCategory,
   PAYMENT_MODALITY_META,
   roundCurrencyBRL,
 } from '../utils/financeEngine';
@@ -72,7 +73,6 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
   const [selectedMonth, setSelectedMonth] = useState<number>(initialMonth);
 
   const selectedMonthKey = getMonthKey(selectedYear, selectedMonth);
-  const selectedMonthEnd = `${selectedMonthKey}-31`;
 
   const availableYears = useMemo(() => {
     const years = new Set<number>([initialYear - 1, initialYear, initialYear + 1]);
@@ -81,7 +81,11 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
       if (y > 2000) years.add(y);
     });
     despesas.forEach((d) => {
-      const y = Number((d.data_competencia || '').slice(0, 4));
+      const refDate =
+        d.origem_tipo && d.competencia_referencia
+          ? d.competencia_referencia
+          : d.data_competencia || '';
+      const y = Number(refDate.slice(0, 4));
       if (y > 2000) years.add(y);
     });
     return Array.from(years).sort((a, b) => b - a);
@@ -110,7 +114,11 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
 
     for (const d of despesas) {
       if (d.deleted_at || d.status === 'cancelado') continue;
-      const key = (d.data_competencia || '').slice(0, 7);
+      const key = (
+        d.origem_tipo && d.competencia_referencia
+          ? d.competencia_referencia
+          : d.data_competencia || ''
+      ).slice(0, 7);
       const arr = expensesMap.get(key);
       if (arr) arr.push(d);
       else expensesMap.set(key, [d]);
@@ -140,8 +148,6 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
   }, [orders, despesas, serviceProviders, investments]);
 
   const computeMonthTotals = (monthKey: string) => {
-    const monthEnd = `${monthKey}-31`;
-
     const paidOrders = groupedByMonth.paidOrdersMap.get(monthKey) || [];
     const unpaidOrdersInMonth = groupedByMonth.unpaidOrdersMap.get(monthKey) || [];
 
@@ -153,22 +159,55 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
     );
 
     const monthExpenses = groupedByMonth.expensesMap.get(monthKey) || [];
+
+    // Separa despesas operacionais das despesas sincronizadas de colaboradores para evitar dupla contagem
+    const operationalExpenses = monthExpenses.filter((d) => !d.origem_tipo);
+    const allProviderExpenses = monthExpenses.filter(
+      (d) => d.origem_tipo === 'prestador'
+    );
+    const providerExpenses = allProviderExpenses.filter(
+      (d) => d.status === 'pago'
+    );
+    const allPayrollExpenses = monthExpenses.filter(
+      (d) => d.origem_tipo === 'funcionario'
+    );
+    const payrollExpenses = allPayrollExpenses.filter(
+      (d) => d.status === 'pago'
+    );
+
     const totalDespesas = roundCurrencyBRL(
-      monthExpenses.reduce((sum, d) => sum + (Number(d.valor) || 0), 0)
+      operationalExpenses.reduce((sum, d) => sum + (Number(d.valor) || 0), 0)
     );
 
+    const syncedProviderIds = new Set(
+      allProviderExpenses.map((d) => d.origem_id).filter(Boolean) as string[]
+    );
     const monthProviders = groupedByMonth.providersMap.get(monthKey) || [];
-    const totalPrestadores = roundCurrencyBRL(
-      monthProviders.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+    const legacyPaidProviders = monthProviders.filter(
+      (p) =>
+        p.status === 'pago' && (!p.dbUuid || !syncedProviderIds.has(p.dbUuid))
     );
+    const totalPrestadores = roundCurrencyBRL(
+      providerExpenses.reduce((sum, d) => sum + (Number(d.valor) || 0), 0) +
+        legacyPaidProviders.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+    );
+    const paidProvidersCount =
+      providerExpenses.length + legacyPaidProviders.length;
 
-    // Saídas: Folha de funcionários admitidos até o mês selecionado
-    const activePayroll = payrollEmployees.filter(
-      (emp) => !emp.admissionDate || emp.admissionDate.slice(0, 10) <= monthEnd
+    const syncedPayrollIds = new Set(
+      allPayrollExpenses.map((d) => d.origem_id).filter(Boolean) as string[]
+    );
+    const legacyPaidPayroll = payrollEmployees.filter(
+      (emp) =>
+        emp.paymentStatus === 'pago' &&
+        (emp.paidCompetence || '').slice(0, 7) === monthKey &&
+        (!emp.dbUuid || !syncedPayrollIds.has(emp.dbUuid))
     );
     const totalFolha = roundCurrencyBRL(
-      activePayroll.reduce((sum, emp) => sum + (Number(emp.salary) || 0), 0)
+      payrollExpenses.reduce((sum, d) => sum + (Number(d.valor) || 0), 0) +
+        legacyPaidPayroll.reduce((sum, emp) => sum + (Number(emp.salary) || 0), 0)
     );
+    const paidPayrollCount = payrollExpenses.length + legacyPaidPayroll.length;
 
     // Investimentos lançados no mês (informativo + detalhamento)
     const monthInvestments = groupedByMonth.investmentsMap.get(monthKey) || [];
@@ -186,11 +225,15 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
       unpaidOrdersInMonth,
       totalEntradas,
       totalNaoPagoMes,
-      monthExpenses,
+      operationalExpenses,
+      providerExpenses,
+      payrollExpenses,
+      legacyPaidProviders,
+      legacyPaidPayroll,
+      paidProvidersCount,
+      paidPayrollCount,
       totalDespesas,
-      monthProviders,
       totalPrestadores,
-      activePayroll,
       totalFolha,
       monthInvestments,
       totalInvestimentos,
@@ -240,9 +283,9 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
 
   const expensesByCategory = useMemo(() => {
     const map = new Map<string, { label: string; colorHex: string; total: number; count: number }>();
-    for (const exp of report.monthExpenses) {
-      const meta = EXPENSE_CATEGORY_MAP[exp.categoria];
-      const key = exp.categoria;
+    for (const exp of report.operationalExpenses) {
+      const key = normalizeExpenseCategory(exp.categoria);
+      const meta = EXPENSE_CATEGORY_MAP[key];
       const cur = map.get(key) || {
         label: meta?.label || key,
         colorHex: meta?.colorHex || '#6366f1',
@@ -254,7 +297,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [report.monthExpenses]);
+  }, [report.operationalExpenses]);
 
   const handleShiftMonth = (delta: number) => {
     const dt = new Date(selectedYear, selectedMonth + delta, 1);
@@ -292,18 +335,65 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
         ].join(';')
       ),
       '',
-      'SAÍDAS — DESPESAS DO MÊS',
+      'SAÍDAS — DESPESAS OPERACIONAIS DO MÊS',
       'Data;Categoria;Descrição;Fornecedor;Status;Valor (R$)',
-      ...report.monthExpenses.map((d) =>
-        [
+      ...report.operationalExpenses.map((d) => {
+        const normCat = normalizeExpenseCategory(d.categoria);
+        return [
           esc(formatDateBR(d.data_competencia)),
-          esc(EXPENSE_CATEGORY_MAP[d.categoria]?.label || d.categoria),
+          esc(EXPENSE_CATEGORY_MAP[normCat]?.label || normCat),
           esc(d.descricao || ''),
           esc(d.fornecedor || ''),
           esc(d.status),
           esc(formatDecimalBR(d.valor)),
-        ].join(';')
-      ),
+        ].join(';');
+      }),
+      ...(report.paidProvidersCount > 0
+        ? [
+            '',
+            'SAÍDAS — PRESTADORES DE SERVIÇO PAGOS',
+            'Data;Prestador / Descrição;Status;Valor (R$)',
+            ...report.providerExpenses.map((d) =>
+              [
+                esc(formatDateBR(d.data_pagamento || d.data_competencia)),
+                esc(d.descricao || d.fornecedor || 'Prestador'),
+                esc(d.status),
+                esc(formatDecimalBR(d.valor)),
+              ].join(';')
+            ),
+            ...report.legacyPaidProviders.map((p) =>
+              [
+                esc(formatDateBR(p.dueDate)),
+                esc(`Prestador — ${p.name} (${p.service})`),
+                esc('pago'),
+                esc(formatDecimalBR(p.amount)),
+              ].join(';')
+            ),
+          ]
+        : []),
+      ...(report.paidPayrollCount > 0
+        ? [
+            '',
+            'SAÍDAS — FOLHA DE FUNCIONÁRIOS PAGA',
+            'Data;Funcionário / Descrição;Status;Valor (R$)',
+            ...report.payrollExpenses.map((d) =>
+              [
+                esc(formatDateBR(d.data_pagamento || d.data_competencia)),
+                esc(d.descricao || d.fornecedor || 'Funcionário'),
+                esc(d.status),
+                esc(formatDecimalBR(d.valor)),
+              ].join(';')
+            ),
+            ...report.legacyPaidPayroll.map((emp) =>
+              [
+                esc(formatDateBR(emp.paidAt || emp.admissionDate)),
+                esc(`Folha — ${emp.name} (${emp.roleTitle})`),
+                esc('pago'),
+                esc(formatDecimalBR(emp.salary)),
+              ].join(';')
+            ),
+          ]
+        : []),
     ];
 
     const csv = '\uFEFF' + lines.join('\r\n');
@@ -664,7 +754,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
             {report.totalPrestadores > 0 && (
               <div className="p-3 rounded-2xl liquid-glass-subtle flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-900">
-                  Prestadores de Serviço ({report.monthProviders.length})
+                  Prestadores de Serviço ({report.paidProvidersCount})
                 </span>
                 <span className="font-mono font-extrabold text-rose-700 shrink-0">
                   -{formatBRL(report.totalPrestadores)}
@@ -675,7 +765,7 @@ export const MonthlyReportSubsection: React.FC<MonthlyReportSubsectionProps> = (
             {report.totalFolha > 0 && (
               <div className="p-3 rounded-2xl liquid-glass-subtle flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-900">
-                  Folha de Funcionários ({report.activePayroll.length})
+                  Folha de Funcionários ({report.paidPayrollCount})
                 </span>
                 <span className="font-mono font-extrabold text-rose-700 shrink-0">
                   -{formatBRL(report.totalFolha)}

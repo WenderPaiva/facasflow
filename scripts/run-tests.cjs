@@ -114,7 +114,10 @@ async function runUnitTests() {
     'energia',
     'internet',
     'alimentacao',
-    'combustivel',
+    'transportes',
+    'custo_depreciacao',
+    'folha_colaboradores',
+    'prestadores_servico',
     'manutencao',
     'contador',
     'marketing',
@@ -123,10 +126,24 @@ async function runUnitTests() {
     'madeira',
     'seguros',
     'impostos',
+    'flow_dashboard',
+    'taxas_bancarias',
     'outros',
   ]) {
     assert.ok(catKeys.includes(requiredCat), `Missing category: ${requiredCat}`);
   }
+
+  assert.equal(financeEngine.EXPENSE_CATEGORY_MAP.transportes.label, 'Transportes');
+  assert.equal(financeEngine.EXPENSE_CATEGORY_MAP.custo_depreciacao.label, 'Custo de Depreciação');
+  assert.equal(financeEngine.EXPENSE_CATEGORY_MAP.folha_colaboradores.label, 'Folha / Colaboradores');
+  assert.equal(financeEngine.EXPENSE_CATEGORY_MAP.prestadores_servico.label, 'Prestação de Serviços');
+  assert.equal(financeEngine.normalizeExpenseCategory('combustivel'), 'transportes');
+  assert.equal(financeEngine.normalizeExpenseCategory('combustível'), 'transportes');
+  assert.equal(financeEngine.normalizeExpenseCategory('transportes'), 'transportes');
+  assert.equal(financeEngine.normalizeExpenseCategory('custo_depreciacao'), 'custo_depreciacao');
+  assert.equal(financeEngine.normalizeExpenseCategory('folha_colaboradores'), 'folha_colaboradores');
+  assert.equal(financeEngine.normalizeExpenseCategory('prestadores_servico'), 'prestadores_servico');
+  assert.equal(financeEngine.normalizeExpenseCategory('desconhecida_xyz'), 'outros');
 
   const errZero = financeEngine.validateExpenseInput({
     categoria: 'laminas',
@@ -159,7 +176,7 @@ async function runUnitTests() {
     data_competencia: '2026-11-18',
   });
   assert.deepEqual(okLaminasNoDesc, {});
-  console.log('[PASS] 4. All 15 expense categories & inline validations');
+  console.log('[PASS] 4. All 20 expense categories, legacy mappings & inline validations');
 
   // 5. Summary calculation & cancelado/deleted exclusion
   const sampleExpenses = [
@@ -241,6 +258,32 @@ async function runUnitTests() {
   assert.equal(financeEngine.formatQuantityBR(2), '2');
   assert.equal(financeEngine.formatQuantityBR(1.5), '1,5');
   console.log('[PASS] 7. Pedido A5 CPF/CNPJ mask, validation, and quantity formatting');
+
+  // 8. Stock integer helpers & Month payment date resolution
+  assert.equal(financeEngine.formatStockInt(15), '15');
+  assert.equal(financeEngine.formatStockInt('15'), '15');
+  assert.equal(financeEngine.formatStockInt(15.8), '16');
+  assert.equal(financeEngine.formatStockInt(15.2), '15');
+  assert.equal(financeEngine.formatStockInt('0'), '0');
+  assert.equal(financeEngine.formatStockInt(-5), '0');
+  assert.equal(financeEngine.formatStockInt(null), '0');
+  assert.equal(financeEngine.formatStockInt(undefined), '0');
+  assert.equal(financeEngine.formatStockInt(''), '0');
+  assert.equal(financeEngine.formatStockInt('abc'), '0');
+
+  assert.equal(financeEngine.sanitizeStockIntInput('123'), '123');
+  assert.equal(financeEngine.sanitizeStockIntInput('12.3'), '123');
+  assert.equal(financeEngine.sanitizeStockIntInput('12,3'), '123');
+  assert.equal(financeEngine.sanitizeStockIntInput('abc-10+e5'), '105');
+  assert.equal(financeEngine.sanitizeStockIntInput(''), '');
+
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-02', 31), '2026-02-28');
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-02', 28), '2026-02-28');
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-02', 5), '2026-02-05');
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-04', 31), '2026-04-30');
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-12', 31), '2026-12-31');
+  assert.equal(financeEngine.resolveMonthPaymentDate('2026-11', 1), '2026-11-01');
+  console.log('[PASS] 8. formatStockInt, sanitizeStockIntInput and resolveMonthPaymentDate helpers');
 }
 
 async function runLiveSupabaseSmokeCheck() {
