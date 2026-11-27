@@ -383,6 +383,7 @@ export function subscribeToCompanyRealtime(
                 return;
               }
               if (row && row.id && row.etapa && !row.deleted_at) {
+                const woodNum = row.wood_mm != null ? Number(row.wood_mm) : undefined;
                 handleIncoming({
                   eventId: `pg_order_${row.id}_v${row.version || row.updated_at || Date.now()}`,
                   company_id,
@@ -402,7 +403,10 @@ export function subscribeToCompanyRealtime(
                     toolDescription: row.descricao_ferramenta || '',
                     bladeMeters:
                       row.blade_meters != null ? Number(row.blade_meters) : undefined,
-                    woodMm: row.wood_mm || undefined,
+                    woodMm:
+                      woodNum === 15 || woodNum === 18 || woodNum === 22
+                        ? woodNum
+                        : undefined,
                     amount: Number(row.valor) || 0,
                     paymentModality: row.forma_pagamento,
                     paymentStatus: row.status_pagamento,
@@ -414,6 +418,8 @@ export function subscribeToCompanyRealtime(
                     createdAt: String(row.created_at || '').slice(0, 10),
                     dueDate: String(row.data_vencimento || '').slice(0, 10),
                     paidAt: row.data_pagamento ? String(row.data_pagamento).slice(0, 10) : undefined,
+                    completedAt: row.concluida_em ? String(row.concluida_em) : undefined,
+                    financialNotes: row.observacao_financeira || undefined,
                   },
                 });
               }

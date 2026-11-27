@@ -875,6 +875,7 @@ export const App: React.FC = () => {
         stageHistory: currentOrder.stageHistory,
         version: currentOrder.version,
         updatedAt: currentOrder.updatedAt,
+        completedAt: currentOrder.completedAt,
       };
       const optimisticOrder: DieOrder = {
         ...currentOrder,
@@ -886,6 +887,7 @@ export const App: React.FC = () => {
         ],
         version: (Number(currentOrder.version) || 1) + 1,
         updatedAt: nowIso,
+        completedAt: targetStage === 'faca_pronta' ? nowIso : undefined,
       };
 
       pendingOrderIdsRef.current.add(orderId);
@@ -906,6 +908,10 @@ export const App: React.FC = () => {
           ...optimisticOrder,
           version: rpcRes.version ?? optimisticOrder.version,
           updatedAt: rpcRes.updatedAt ?? optimisticOrder.updatedAt,
+          completedAt:
+            targetStage === 'faca_pronta'
+              ? rpcRes.completedAt || optimisticOrder.completedAt
+              : undefined,
         };
 
         pendingOrderIdsRef.current.delete(orderId);
@@ -1182,6 +1188,7 @@ export const App: React.FC = () => {
             ],
             version: rpcRes.version ?? (Number(ord.version) || 1) + 1,
             updatedAt: rpcRes.updatedAt ?? new Date().toISOString(),
+            completedAt: rpcRes.completedAt || new Date().toISOString(),
           };
           setDb((prev) => ({
             ...prev,
@@ -2551,6 +2558,7 @@ export const App: React.FC = () => {
               {effectiveSection === 'esteira' && (
                 <ProductionKanban
                   orders={filteredOrders}
+                  allOrders={db.orders}
                   userRole={session.role}
                   pendingOrderIds={pendingOrderIds}
                   moveError={moveError}

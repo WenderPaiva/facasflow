@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Archive,
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
@@ -16,14 +17,18 @@ import { DieOrder, ProductionStage, UserRole } from '../types/order';
 import {
   formatBRL,
   formatDateBR,
+  formatDateTimeGoiasBR,
   getNextStage,
   getPrevStage,
+  MAX_RECENT_FINISHED_ORDERS,
+  partitionFinishedOrders,
   PAYMENT_MODALITY_META,
   PRODUCTION_STAGES,
 } from '../utils/financeEngine';
 
 interface ProductionKanbanProps {
   orders: DieOrder[];
+  allOrders?: DieOrder[];
   userRole?: UserRole;
   pendingOrderIds?: string[];
   moveError?: string | null;
@@ -248,8 +253,313 @@ const OrderKanbanCard = React.memo<OrderKanbanCardProps>(
   }
 );
 
+interface StoredOrderMiniCardProps {
+  order: DieOrder;
+  isPending: boolean;
+  isExpanded: boolean;
+  canEditOrder: boolean;
+  canDeleteOrder: boolean;
+  onToggleExpand: (id: string) => void;
+  onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
+  onQuickRegisterDelivery: (order: DieOrder) => void;
+  onEditOrder?: (order: DieOrder) => void;
+  onDeleteOrder: (orderId: string) => void;
+}
+
+const StoredOrderMiniCard = React.memo<StoredOrderMiniCardProps>(
+  ({
+    order,
+    isPending,
+    isExpanded,
+    canEditOrder,
+    canDeleteOrder,
+    onToggleExpand,
+    onMoveStage,
+    onQuickRegisterDelivery,
+    onEditOrder,
+    onDeleteOrder,
+  }) => {
+    const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
+    const hasBlade = order.bladeMeters !== undefined && order.bladeMeters !== null;
+    const hasWood = Boolean(order.woodMm);
+
+    return (
+      <div
+        className={`rounded-xl p-2.5 liquid-glass-subtle hover:bg-white/50 transition-colors flex flex-col justify-between gap-2 min-w-0 ${
+          isPending ? 'opacity-75 ring-1 ring-emerald-400/70' : ''
+        }`}
+      >
+        <div className="space-y-1.5 min-w-0">
+          {/* Linha 1: Código OS + Modalidade + Pagamento + Ações centralizadas */}
+          <div className="flex items-start justify-between gap-1.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-1 min-w-0">
+              <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-300/60 font-mono text-[10px] font-bold text-emerald-800 shrink-0">
+                {order.id}
+              </span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${modMeta?.badgeClass}`}
+                title={modMeta?.label}
+              >
+                {modMeta?.short}
+              </span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                  order.paymentStatus === 'pago'
+                    ? 'bg-emerald-500/15 text-emerald-800 border-emerald-300/60'
+                    : 'bg-white/70 text-slate-700 border-white/80'
+                }`}
+              >
+                {order.paymentStatus === 'pago' ? 'Pago' : 'Não Pago'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => onToggleExpand(order.id)}
+                className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-white/95 text-slate-600 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                title={isExpanded ? 'Recolher detalhes' : 'Visualizar detalhes'}
+                aria-label={isExpanded ? 'Recolher detalhes' : 'Visualizar detalhes'}
+              >
+                {isExpanded ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
+              {canEditOrder && (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => onEditOrder?.(order)}
+                  className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-500 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                  title="Editar esta OS"
+                  aria-label="Editar esta OS"
+                >
+                  <Edit3 className="w-3 h-3" />
+                </button>
+              )}
+              {canDeleteOrder && (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => onDeleteOrder(order.id)}
+                  className="btn-compact w-6 h-6 rounded-lg bg-white/65 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                  title="Excluir esta OS"
+                  aria-label="Excluir esta OS"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Linha 2: Cliente + Descrição/Medidas sem truncar + Tags técnicas */}
+          <div className="min-w-0 space-y-1">
+            <span className="text-[11px] font-bold text-slate-600 block break-words leading-tight">
+              {order.companyName}
+            </span>
+            <h4 className="text-xs font-extrabold text-slate-900 leading-tight break-words">
+              {order.toolDescription}
+            </h4>
+            {(hasBlade || hasWood) && (
+              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                {hasBlade && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-white/65 border border-white/80 text-[9px] font-bold text-slate-700">
+                    {order.bladeMeters} m
+                  </span>
+                )}
+                {hasWood && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-300/60 text-[9px] font-bold text-amber-900">
+                    {order.woodMm} mm
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Detalhes expandidos */}
+          {isExpanded && (
+            <div className="p-2 rounded-lg bg-white/65 border border-white/80 text-[10px] space-y-0.5 text-slate-700 leading-tight">
+              <div>
+                <strong>Cadastro:</strong> {formatDateBR(order.createdAt)}
+              </div>
+              <div>
+                <strong>Concluída em:</strong>{' '}
+                {order.completedAt
+                  ? formatDateTimeGoiasBR(order.completedAt)
+                  : order.stageUpdatedAt || '—'}
+              </div>
+              <div>
+                <strong>Vencimento:</strong> {formatDateBR(order.dueDate)}
+              </div>
+              <div className="break-words">
+                <strong>Telefone:</strong> {order.companyPhone || 'Não informado'}
+              </div>
+              <div>
+                <strong>Lâmina:</strong> {hasBlade ? `${order.bladeMeters} m` : 'Não informada'}
+              </div>
+              <div>
+                <strong>Madeira:</strong> {hasWood ? `${order.woodMm} mm` : 'Não informada'}
+              </div>
+              {order.financialNotes?.trim() && (
+                <div className="break-words">
+                  <strong>Obs. Financeira:</strong> {order.financialNotes}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Linha 3: Finalização + Valor */}
+          <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-700 bg-white/55 px-2 py-1 rounded-lg border border-white/70 min-w-0">
+            <span className="flex items-center gap-1 font-semibold min-w-0">
+              <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+              <span className="break-words leading-tight">
+                {isPending
+                  ? 'Salvando...'
+                  : order.stageUpdatedAt ||
+                    (order.completedAt
+                      ? formatDateTimeGoiasBR(order.completedAt)
+                      : formatDateBR(order.createdAt))}
+              </span>
+            </span>
+            <span className="font-mono font-extrabold text-emerald-700 shrink-0">
+              {formatBRL(order.amount)}
+            </span>
+          </div>
+        </div>
+
+        {/* Linha 4: Ações rápidas (Reabrir / Despachar) */}
+        <div className="flex items-center gap-1.5 pt-0.5 min-w-0">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => onMoveStage(order.id, 'faca_ajustada')}
+            className="btn-compact px-2 py-1.5 rounded-lg text-[10px] font-bold bg-white/70 hover:bg-white disabled:opacity-50 text-slate-700 border border-white/80 flex items-center justify-center gap-1 transition-colors cursor-pointer shrink-0"
+            title="Retornar para Faca Ajustada"
+          >
+            <RotateCcw className="w-3 h-3 shrink-0" />
+            <span>Reabrir</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => onQuickRegisterDelivery(order)}
+            className="btn-compact flex-1 min-w-0 py-1.5 px-2 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white border border-white/40 shadow-sm flex items-center justify-center gap-1 transition-colors cursor-pointer"
+            title="Registrar saída e despacho logístico"
+          >
+            <Truck className="w-3 h-3 shrink-0" />
+            <span>Despachar</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+);
+
+interface StoredOrdersSubsectionProps {
+  storedOrders: DieOrder[];
+  storedTotalVolume: number;
+  recentCount: number;
+  pendingSet: Set<string>;
+  expandedOrderIds: Set<string>;
+  canEditOrder: boolean;
+  canDeleteOrder: boolean;
+  onToggleExpand: (id: string) => void;
+  onMoveStage: (orderId: string, targetStage: ProductionStage) => void;
+  onQuickRegisterDelivery: (order: DieOrder) => void;
+  onEditOrder?: (order: DieOrder) => void;
+  onDeleteOrder: (orderId: string) => void;
+  onBackToFinished?: () => void;
+}
+
+const StoredOrdersSubsection: React.FC<StoredOrdersSubsectionProps> = ({
+  storedOrders,
+  storedTotalVolume,
+  recentCount,
+  pendingSet,
+  expandedOrderIds,
+  canEditOrder,
+  canDeleteOrder,
+  onToggleExpand,
+  onMoveStage,
+  onQuickRegisterDelivery,
+  onEditOrder,
+  onDeleteOrder,
+  onBackToFinished,
+}) => (
+  <div className="liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4 min-w-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/60">
+      <div className="flex items-center gap-2.5">
+        <div className="w-10 h-10 rounded-2xl bg-slate-700/10 border border-slate-400/40 flex items-center justify-center text-slate-700 shrink-0">
+          <Archive className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">
+            Facas Armazenadas ({storedOrders.length})
+          </h3>
+          <p className="text-xs font-medium text-slate-600">
+            Histórico automático das facas finalizadas excedentes além das {MAX_RECENT_FINISHED_ORDERS} mais recentes, organizado em grade compacta.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {onBackToFinished && (
+          <button
+            type="button"
+            onClick={onBackToFinished}
+            className="liquid-glass-pill px-3.5 py-2 rounded-full text-xs font-bold text-emerald-800 hover:bg-white/80 inline-flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Facas Finalizadas ({recentCount})</span>
+          </button>
+        )}
+
+        <div className="liquid-glass-pill px-4 py-2 rounded-full text-xs font-bold text-slate-800">
+          Volume Armazenado:{' '}
+          <strong className="font-mono text-emerald-700">
+            {formatBRL(storedTotalVolume)}
+          </strong>
+        </div>
+      </div>
+    </div>
+
+    {storedOrders.length === 0 ? (
+      <div className="p-8 rounded-2xl border border-dashed border-white/75 bg-white/20 text-center space-y-1">
+        <p className="text-sm font-bold text-slate-700">
+          Nenhuma faca armazenada ainda.
+        </p>
+        <p className="text-xs text-slate-600">
+          As {MAX_RECENT_FINISHED_ORDERS} facas finalizadas mais recentes permanecem em destaque acima; a partir da {MAX_RECENT_FINISHED_ORDERS + 1}ª, as mais antigas aparecem automaticamente aqui.
+        </p>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2.5 items-start">
+        {storedOrders.map((order) => (
+          <StoredOrderMiniCard
+            key={order.id}
+            order={order}
+            isPending={pendingSet.has(order.id)}
+            isExpanded={expandedOrderIds.has(order.id)}
+            canEditOrder={canEditOrder}
+            canDeleteOrder={canDeleteOrder}
+            onToggleExpand={onToggleExpand}
+            onMoveStage={onMoveStage}
+            onQuickRegisterDelivery={onQuickRegisterDelivery}
+            onEditOrder={onEditOrder}
+            onDeleteOrder={onDeleteOrder}
+          />
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
   orders,
+  allOrders,
   userRole,
   pendingOrderIds = [],
   moveError,
@@ -258,7 +568,7 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
   onEditOrder,
   onDeleteOrder,
 }) => {
-  const [activeView, setActiveView] = useState<'producao' | 'prontas'>('producao');
+  const [activeView, setActiveView] = useState<'producao' | 'prontas' | 'armazenadas'>('producao');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<ProductionStage | null>(null);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(
@@ -274,13 +584,29 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
     () => orders.filter((o) => o.stage !== 'faca_pronta'),
     [orders]
   );
-  const readyOrders = useMemo(
-    () => orders.filter((o) => o.stage === 'faca_pronta'),
-    [orders]
+  const { allFinished, recentFinished, storedFinished } = useMemo(() => {
+    const queueSource = allOrders ?? orders;
+    const partitioned = partitionFinishedOrders(
+      queueSource,
+      MAX_RECENT_FINISHED_ORDERS
+    );
+    if (!allOrders || allOrders === orders) {
+      return partitioned;
+    }
+    const visibleIds = new Set(orders.map((o) => o.id));
+    return {
+      allFinished: partitioned.allFinished.filter((o) => visibleIds.has(o.id)),
+      recentFinished: partitioned.recentFinished.filter((o) => visibleIds.has(o.id)),
+      storedFinished: partitioned.storedFinished.filter((o) => visibleIds.has(o.id)),
+    };
+  }, [allOrders, orders]);
+  const recentTotalVolume = useMemo(
+    () => recentFinished.reduce((acc, o) => acc + (o.amount || 0), 0),
+    [recentFinished]
   );
-  const readyTotalVolume = useMemo(
-    () => readyOrders.reduce((acc, o) => acc + (o.amount || 0), 0),
-    [readyOrders]
+  const storedTotalVolume = useMemo(
+    () => storedFinished.reduce((acc, o) => acc + (o.amount || 0), 0),
+    [storedFinished]
   );
 
   const handleToggleExpand = useCallback((orderId: string) => {
@@ -299,14 +625,14 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
 
   return (
     <div className="space-y-5 min-w-0">
-      {/* Header + Subseção Tabs (Em Produção vs Facas Prontas) */}
+      {/* Header + Subseção Tabs (Em Produção vs Facas Finalizadas vs Facas Armazenadas) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-extrabold text-slate-900 tracking-tight frosted-text-depth">
             Esteira de Produção
           </h2>
           <p className="text-xs font-medium text-slate-700">
-            Arraste os cartões ou avance etapas. Facas finalizadas vão automaticamente para a aba Facas Prontas.
+            Arraste os cartões ou avance etapas. As {MAX_RECENT_FINISHED_ORDERS} facas mais recentes ficam em Facas Finalizadas e as anteriores seguem para Facas Armazenadas.
           </p>
         </div>
 
@@ -364,7 +690,7 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
             title="Clique para abrir ou arraste uma faca aqui para concluir"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Facas Prontas</span>
+            <span>Facas Finalizadas</span>
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
                 activeView === 'prontas'
@@ -372,7 +698,30 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
                   : 'bg-emerald-500/15 text-emerald-800 border border-emerald-300/60'
               }`}
             >
-              {readyOrders.length}
+              {recentFinished.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView('armazenadas')}
+            className={`min-h-[40px] px-4 py-2 rounded-full text-xs font-bold inline-flex items-center gap-2 transition cursor-pointer ${
+              activeView === 'armazenadas'
+                ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-md border border-white/40'
+                : 'liquid-glass-pill text-slate-700'
+            }`}
+            title={`Visualizar todas as ${storedFinished.length} facas armazenadas (${allFinished.length} finalizadas no total)`}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Facas Armazenadas</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                activeView === 'armazenadas'
+                  ? 'bg-white/25 text-white'
+                  : 'bg-white/65 text-slate-800 border border-white/80'
+              }`}
+            >
+              {storedFinished.length}
             </span>
           </button>
         </div>
@@ -473,197 +822,236 @@ export const ProductionKanban: React.FC<ProductionKanbanProps> = ({
             );
           })}
         </div>
-      ) : (
-        /* Subseção Dedicada: Facas Prontas / Concluídas */
-        <div className="liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4 min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/60">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-300/60 flex items-center justify-center text-emerald-700 shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
+      ) : activeView === 'prontas' ? (
+        <div className="space-y-5 min-w-0">
+          {/* Subseção Principal: Facas Finalizadas (Fila automática das 15 mais recentes) */}
+          <div className="liquid-glass rounded-[28px] p-5 sm:p-6 space-y-4 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-300/60 flex items-center justify-center text-emerald-700 shrink-0">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Facas Finalizadas ({recentFinished.length}/{MAX_RECENT_FINISHED_ORDERS})
+                  </h3>
+                  <p className="text-xs font-medium text-slate-600">
+                    Fila automática das {MAX_RECENT_FINISHED_ORDERS} facas finalizadas mais recentes. Ao concluir a 16ª, a mais antiga desta fila move automaticamente para Facas Armazenadas abaixo.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Facas Prontas / Concluídas ({readyOrders.length})
-                </h3>
-                <p className="text-xs font-medium text-slate-600">
-                  Ferramentas finalizadas e liberadas para retirada ou despacho logístico.
+
+              <div className="liquid-glass-pill px-4 py-2 rounded-full text-xs font-bold text-slate-800">
+                Volume Recentes:{' '}
+                <strong className="font-mono text-emerald-700">
+                  {formatBRL(recentTotalVolume)}
+                </strong>
+              </div>
+            </div>
+
+            {recentFinished.length === 0 ? (
+              <div className="p-10 rounded-2xl border border-dashed border-white/75 bg-white/20 text-center space-y-1">
+                <p className="text-sm font-bold text-slate-700">
+                  Nenhuma faca finalizada ainda.
+                </p>
+                <p className="text-xs text-slate-600">
+                  Ao clicar em &quot;Concluir Faca&quot; na etapa Faca Ajustada, o pedido aparecerá automaticamente aqui.
                 </p>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {recentFinished.map((order) => {
+                  const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
+                  const isPending = pendingSet.has(order.id);
+                  const isExpanded = expandedOrderIds.has(order.id);
 
-            <div className="liquid-glass-pill px-4 py-2 rounded-full text-xs font-bold text-slate-800">
-              Volume Concluído:{' '}
-              <strong className="font-mono text-emerald-700">
-                {formatBRL(readyTotalVolume)}
-              </strong>
-            </div>
+                  return (
+                    <div
+                      key={order.id}
+                      className={`rounded-2xl p-4 liquid-glass-subtle hover:bg-white/45 transition flex flex-col justify-between gap-3 overflow-hidden min-w-0 ${
+                        isPending ? 'opacity-75 ring-1 ring-emerald-400/70' : ''
+                      }`}
+                    >
+                      <div className="space-y-2.5 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-300/60 font-mono text-[11px] font-bold text-emerald-800 shrink-0">
+                              {order.id}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${modMeta?.badgeClass}`}
+                            >
+                              {modMeta?.short}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                order.paymentStatus === 'pago'
+                                  ? 'bg-emerald-500/15 text-emerald-800 border-emerald-300/60'
+                                  : 'bg-white/70 text-slate-700 border-white/80'
+                              }`}
+                            >
+                              {order.paymentStatus === 'pago' ? 'Pago' : 'Não Pago'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleExpand(order.id)}
+                              className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-white/95 text-slate-600 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
+                              title={isExpanded ? 'Recolher detalhes' : 'Exibir mais detalhes'}
+                              aria-label={isExpanded ? 'Recolher detalhes' : 'Exibir mais detalhes'}
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="w-3.5 h-3.5" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            {canEditOrder && (
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => onEditOrder?.(order)}
+                                className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-500 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
+                                title="Editar esta OS"
+                                aria-label="Editar esta OS"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {canDeleteOrder && (
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => onDeleteOrder(order.id)}
+                                className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
+                                title="Excluir esta OS"
+                                aria-label="Excluir esta OS"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-600 block truncate">
+                            {order.companyName}
+                          </span>
+                          <h4 className="text-sm font-extrabold text-slate-900 leading-snug mt-0.5 break-words">
+                            {order.toolDescription}
+                          </h4>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="p-2.5 rounded-xl bg-white/60 border border-white/80 text-[11px] space-y-1 text-slate-700">
+                            <div>
+                              <strong>Cadastro:</strong> {formatDateBR(order.createdAt)}
+                            </div>
+                            <div>
+                              <strong>Vencimento:</strong> {formatDateBR(order.dueDate)}
+                            </div>
+                            <div>
+                              <strong>Telefone:</strong> {order.companyPhone || 'Não informado'}
+                            </div>
+                            {order.bladeMeters !== undefined && order.bladeMeters !== null && (
+                              <div>
+                                <strong>Lâmina:</strong> {order.bladeMeters} m
+                              </div>
+                            )}
+                            {order.woodMm && (
+                              <div>
+                                <strong>Madeira:</strong> {order.woodMm} mm
+                              </div>
+                            )}
+                            {order.financialNotes?.trim() && (
+                              <div className="break-words">
+                                <strong>Obs. Financeira:</strong> {order.financialNotes}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-700 bg-white/55 px-2.5 py-1.5 rounded-xl border border-white/70">
+                          <span className="flex items-center gap-1 font-semibold truncate">
+                            <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span className="truncate">
+                              Concluída:{' '}
+                              {order.stageUpdatedAt ||
+                                (order.completedAt
+                                  ? formatDateTimeGoiasBR(order.completedAt)
+                                  : '—')}
+                            </span>
+                          </span>
+                          <span className="font-mono font-extrabold text-emerald-700 shrink-0">
+                            {formatBRL(order.amount)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => onMoveStage(order.id, 'faca_ajustada')}
+                          className="btn-compact px-3 py-2 rounded-xl text-[11px] font-bold bg-white/70 hover:bg-white disabled:opacity-50 text-slate-700 border border-white/80 flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
+                          title="Retornar para Faca Ajustada"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Reabrir</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => onQuickRegisterDelivery(order)}
+                          className="btn-compact flex-1 py-2 px-3 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white border border-white/40 shadow-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Truck className="w-3.5 h-3.5 shrink-0" />
+                          <span>Despachar / Saída</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {readyOrders.length === 0 ? (
-            <div className="p-10 rounded-2xl border border-dashed border-white/75 bg-white/20 text-center space-y-1">
-              <p className="text-sm font-bold text-slate-700">
-                Nenhuma faca concluída ainda.
-              </p>
-              <p className="text-xs text-slate-600">
-                Ao clicar em &quot;Concluir Faca&quot; na etapa Faca Ajustada, o pedido aparecerá automaticamente aqui.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {readyOrders.map((order) => {
-                const modMeta = PAYMENT_MODALITY_META[order.paymentModality];
-                const isPending = pendingSet.has(order.id);
-                const isExpanded = expandedOrderIds.has(order.id);
-
-                return (
-                  <div
-                    key={order.id}
-                    className={`rounded-2xl p-4 liquid-glass-subtle hover:bg-white/45 transition flex flex-col justify-between gap-3 overflow-hidden min-w-0 ${
-                      isPending ? 'opacity-75 ring-1 ring-emerald-400/70' : ''
-                    }`}
-                  >
-                    <div className="space-y-2.5 min-w-0">
-                      <div className="flex flex-wrap items-center justify-between gap-1.5 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-300/60 font-mono text-[11px] font-bold text-emerald-800 shrink-0">
-                            {order.id}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${modMeta?.badgeClass}`}
-                          >
-                            {modMeta?.short}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                              order.paymentStatus === 'pago'
-                                ? 'bg-emerald-500/15 text-emerald-800 border-emerald-300/60'
-                                : 'bg-white/70 text-slate-700 border-white/80'
-                            }`}
-                          >
-                            {order.paymentStatus === 'pago' ? 'Pago' : 'Não Pago'}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleExpand(order.id)}
-                            className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-white/95 text-slate-600 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
-                            title={isExpanded ? 'Recolher detalhes' : 'Exibir mais detalhes'}
-                            aria-label={isExpanded ? 'Recolher detalhes' : 'Exibir mais detalhes'}
-                          >
-                            {isExpanded ? (
-                              <ChevronUp className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          {canEditOrder && (
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() => onEditOrder?.(order)}
-                              className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-indigo-500/20 disabled:opacity-50 text-slate-500 hover:text-indigo-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
-                              title="Editar esta OS"
-                              aria-label="Editar esta OS"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          {canDeleteOrder && (
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() => onDeleteOrder(order.id)}
-                              className="btn-compact w-7 h-7 rounded-lg bg-white/65 hover:bg-rose-500/20 disabled:opacity-50 text-slate-500 hover:text-rose-700 border border-white/80 flex items-center justify-center transition cursor-pointer shrink-0"
-                              title="Excluir esta OS"
-                              aria-label="Excluir esta OS"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold text-slate-600 block truncate">
-                          {order.companyName}
-                        </span>
-                        <h4 className="text-sm font-extrabold text-slate-900 leading-snug mt-0.5 break-words">
-                          {order.toolDescription}
-                        </h4>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="p-2.5 rounded-xl bg-white/60 border border-white/80 text-[11px] space-y-1 text-slate-700">
-                          <div>
-                            <strong>Cadastro:</strong> {formatDateBR(order.createdAt)}
-                          </div>
-                          <div>
-                            <strong>Vencimento:</strong> {formatDateBR(order.dueDate)}
-                          </div>
-                          <div>
-                            <strong>Telefone:</strong> {order.companyPhone || 'Não informado'}
-                          </div>
-                          {order.bladeMeters !== undefined && order.bladeMeters !== null && (
-                            <div>
-                              <strong>Lâmina:</strong> {order.bladeMeters} m
-                            </div>
-                          )}
-                          {order.woodMm && (
-                            <div>
-                              <strong>Madeira:</strong> {order.woodMm} mm
-                            </div>
-                          )}
-                          {order.financialNotes?.trim() && (
-                            <div className="break-words">
-                              <strong>Obs. Financeira:</strong> {order.financialNotes}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between text-[11px] text-slate-700 bg-white/55 px-2.5 py-1.5 rounded-xl border border-white/70">
-                        <span className="flex items-center gap-1 font-semibold truncate">
-                          <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span className="truncate">
-                            Concluída: {order.stageUpdatedAt}
-                          </span>
-                        </span>
-                        <span className="font-mono font-extrabold text-emerald-700 shrink-0">
-                          {formatBRL(order.amount)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() => onMoveStage(order.id, 'faca_ajustada')}
-                        className="btn-compact px-3 py-2 rounded-xl text-[11px] font-bold bg-white/70 hover:bg-white text-slate-700 border border-white/80 inline-flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
-                        title="Retornar para Faca Ajustada"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Reabrir</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() => onQuickRegisterDelivery(order)}
-                        className="btn-compact flex-1 py-2 px-3 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white border border-white/40 shadow-sm inline-flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Truck className="w-3.5 h-3.5 shrink-0" />
-                        <span>Despachar / Saída</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* Subseção Nativa Sempre Aberta: Facas Armazenadas */}
+          <StoredOrdersSubsection
+            storedOrders={storedFinished}
+            storedTotalVolume={storedTotalVolume}
+            recentCount={recentFinished.length}
+            pendingSet={pendingSet}
+            expandedOrderIds={expandedOrderIds}
+            canEditOrder={canEditOrder}
+            canDeleteOrder={canDeleteOrder}
+            onToggleExpand={handleToggleExpand}
+            onMoveStage={onMoveStage}
+            onQuickRegisterDelivery={onQuickRegisterDelivery}
+            onEditOrder={onEditOrder}
+            onDeleteOrder={onDeleteOrder}
+          />
         </div>
+      ) : (
+        /* Aba Direta: Facas Armazenadas */
+        <StoredOrdersSubsection
+          storedOrders={storedFinished}
+          storedTotalVolume={storedTotalVolume}
+          recentCount={recentFinished.length}
+          pendingSet={pendingSet}
+          expandedOrderIds={expandedOrderIds}
+          canEditOrder={canEditOrder}
+          canDeleteOrder={canDeleteOrder}
+          onToggleExpand={handleToggleExpand}
+          onMoveStage={onMoveStage}
+          onQuickRegisterDelivery={onQuickRegisterDelivery}
+          onEditOrder={onEditOrder}
+          onDeleteOrder={onDeleteOrder}
+          onBackToFinished={() => setActiveView('prontas')}
+        />
       )}
     </div>
   );

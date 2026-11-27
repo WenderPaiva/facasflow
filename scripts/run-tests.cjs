@@ -284,6 +284,174 @@ async function runUnitTests() {
   assert.equal(financeEngine.resolveMonthPaymentDate('2026-12', 31), '2026-12-31');
   assert.equal(financeEngine.resolveMonthPaymentDate('2026-11', 1), '2026-11-01');
   console.log('[PASS] 8. formatStockInt, sanitizeStockIntInput and resolveMonthPaymentDate helpers');
+
+  // 9. FIFO queue keeps 15 newest finished orders and archives older ones in Facas Armazenadas
+  assert.equal(financeEngine.MAX_RECENT_FINISHED_ORDERS, 15);
+
+  const makeMockOrder = (overrides = {}) => ({
+    id: 'OS-001',
+    companyId: 'comp-1',
+    companyName: 'Cliente Teste',
+    companyPhone: '11999999999',
+    toolDescription: 'Faca Teste',
+    amount: 250,
+    paymentModality: 'pix',
+    paymentStatus: 'pago',
+    stage: 'faca_pronta',
+    stageUpdatedAt: '2026-11-27T10:00:00.000Z',
+    stageHistory: [],
+    createdAt: '2026-11-20',
+    dueDate: '2026-11-25',
+    ...overrides,
+  });
+
+  // 1) 11 ordens faca_pronta + 3 ordens em etapas ativas
+  const finishedOrders11 = Array.from({ length: 11 }, (_, i) =>
+    makeMockOrder({
+      id: `OS-${String(i + 1).padStart(3, '0')}`,
+      stage: 'faca_pronta',
+      completedAt: `2026-11-20T${String(10 + i).padStart(2, '0')}:00:00.000Z`,
+    })
+  );
+  const activeOrders3 = [
+    makeMockOrder({ id: 'OS-ACT-1', stage: 'arquivo_recebido' }),
+    makeMockOrder({ id: 'OS-ACT-2', stage: 'faca_serrada' }),
+    makeMockOrder({ id: 'OS-ACT-3', stage: 'faca_ajustada' }),
+  ];
+  const mixedOrders = [...finishedOrders11, ...activeOrders3];
+  const part1 = financeEngine.partitionFinishedOrders(mixedOrders, financeEngine.MAX_RECENT_FINISHED_ORDERS);
+  assert.equal(part1.recentFinished.length, 11);
+  assert.equal(part1.storedFinished.length, 0);
+  assert.equal(part1.allFinished.length, 11);
+  assert.ok(
+    part1.allFinished.every((o) => o.stage === 'faca_pronta'),
+    'Nenhuma ordem ativa pode entrar em allFinished'
+  );
+  for (const act of activeOrders3) {
+    assert.ok(
+      !part1.allFinished.some((o) => o.id === act.id),
+      `Ordem ativa ${act.id} não pode constar em allFinished`
+    );
+  }
+
+  // 2) 22 ordens faca_pronta com timestamps completedAt crescentes
+  // Ordem 1: mais antiga; Ordem 22: mais nova
+  const orders22 = Array.from({ length: 22 }, (_, i) => {
+    const num = i + 1;
+    const dayStr = String(num).padStart(2, '0');
+    return makeMockOrder({
+      id: `OS-${dayStr}`,
+      stage: 'faca_pronta',
+      completedAt: `2026-11-${dayStr}T12:00:00.000Z`,
+      createdAt: '2026-11-01',
+    });
+  });
+  const part2 = financeEngine.partitionFinishedOrders(orders22, financeEngine.MAX_RECENT_FINISHED_ORDERS);
+  assert.equal(part2.allFinished.length, 22);
+  assert.equal(part2.recentFinished.length, 15);
+  assert.equal(part2.storedFinished.length, 7);
+
+  // recentFinished deve conter exatamente as 15 mais novas (da #22 até #8 em ordem decrescente)
+  const expectedRecentIds = Array.from({ length: 15 }, (_, i) => `OS-${String(22 - i).padStart(2, '0')}`);
+  assert.deepEqual(
+    part2.recentFinished.map((o) => o.id),
+    expectedRecentIds,
+    'recentFinished deve conter as 15 ordens mais recentes (#22 até #8)'
+  );
+
+  // storedFinished deve conter da #7 até #1 em ordem decrescente
+  const expectedStoredIds = Array.from({ length: 7 }, (_, i) => `OS-${String(7 - i).padStart(2, '0')}`);
+  assert.deepEqual(
+    part2.storedFinished.map((o) => o.id),
+    expectedStoredIds,
+    'storedFinished deve conter as 7 ordens restantes (#7 até #1 em ordem decrescente)'
+  );
+
+  // 3) Simular conclusão de uma 23ª ordem (#23): entra em recentFinished[0] e #8 desloca-se para storedFinished[0]
+  const order23 = makeMockOrder({
+    id: 'OS-23',
+    stage: 'faca_pronta',
+    completedAt: '2026-11-23T12:00:00.000Z',
+    createdAt: '2026-11-01',
+  });
+  const orders23 = [...orders22, order23];
+  const part3 = financeEngine.partitionFinishedOrders(orders23, financeEngine.MAX_RECENT_FINISHED_ORDERS);
+  assert.equal(part3.allFinished.length, 23);
+  assert.equal(part3.recentFinished.length, 15);
+  assert.equal(part3.storedFinished.length, 8);
+  assert.equal(part3.recentFinished[0].id, 'OS-23', '23ª ordem deve entrar no topo de recentFinished');
+  assert.equal(part3.storedFinished[0].id, 'OS-08', 'Ordem #8 deve deslocar-se automaticamente para o topo de storedFinished');
+  assert.equal(part3.recentFinished[14].id, 'OS-09');
+
+  // 4) Simular edição financeira (updatedAt mais novo) em uma ordem antiga já armazenada (#2 com completedAt antigo)
+  // Validar que ela permanece em storedFinished e NÃO fura a fila de recentFinished
+  const ordersWithEdit = orders23.map((ord) => {
+    if (ord.id === 'OS-02') {
+      return {
+        ...ord,
+        amount: 999.5,
+        paymentStatus: 'pago',
+        updatedAt: '2026-11-27T18:00:00.000Z',
+      };
+    }
+    return ord;
+  });
+  const part4 = financeEngine.partitionFinishedOrders(ordersWithEdit, financeEngine.MAX_RECENT_FINISHED_ORDERS);
+  assert.equal(
+    part4.recentFinished.some((o) => o.id === 'OS-02'),
+    false,
+    'Ordem #2 com updatedAt recente NÃO deve furar a fila de recentFinished'
+  );
+  assert.equal(
+    part4.storedFinished.some((o) => o.id === 'OS-02'),
+    true,
+    'Ordem #2 deve permanecer em storedFinished'
+  );
+  assert.equal(part4.recentFinished[0].id, 'OS-23');
+  assert.equal(part4.storedFinished[0].id, 'OS-08');
+
+  // 5) Testar fallback legado quando completedAt está ausente e apenas stageUpdatedAt / stageHistory possui "DD/MM às HH:mm"
+  // (incluindo virada Dezembro -> Janeiro)
+  const legacyJanOrder = makeMockOrder({
+    id: 'OS-LEG-JAN',
+    stage: 'faca_pronta',
+    completedAt: undefined,
+    createdAt: '2025-12-28',
+    stageUpdatedAt: '03/01 às 14:30',
+    stageHistory: [
+      { stage: 'arquivo_recebido', timestamp: '28/12 às 09:00' },
+      { stage: 'faca_pronta', timestamp: '03/01 às 14:30' },
+    ],
+  });
+
+  const legacyDecOrder = makeMockOrder({
+    id: 'OS-LEG-DEC',
+    stage: 'faca_pronta',
+    completedAt: undefined,
+    createdAt: '2025-12-10',
+    stageUpdatedAt: '20/12 às 10:00',
+    stageHistory: [
+      { stage: 'faca_pronta', timestamp: '20/12 às 10:00' },
+    ],
+  });
+
+  const tsJan = financeEngine.getOrderCompletionTimestampMs(legacyJanOrder);
+  const tsDec = financeEngine.getOrderCompletionTimestampMs(legacyDecOrder);
+
+  // 03/01/2026 14:30 UTC-3 = 17:30 UTC
+  const expectedJanUtc = Date.UTC(2026, 0, 3, 17, 30);
+  // 20/12/2025 10:00 UTC-3 = 13:00 UTC
+  const expectedDecUtc = Date.UTC(2025, 11, 20, 13, 0);
+
+  assert.equal(tsJan, expectedJanUtc, 'Virada Dezembro -> Janeiro deve inferir ano subsequente (2026)');
+  assert.equal(tsDec, expectedDecUtc, 'Conclusão em Dezembro deve manter ano de criação (2025)');
+  assert.ok(tsJan > tsDec, 'Ordem concluída em Janeiro/2026 deve ter timestamp maior que Dezembro/2025');
+
+  const partLegacy = financeEngine.partitionFinishedOrders([legacyDecOrder, legacyJanOrder]);
+  assert.equal(partLegacy.allFinished[0].id, 'OS-LEG-JAN', 'Ordem de Janeiro deve vir antes de Dezembro');
+  assert.equal(partLegacy.allFinished[1].id, 'OS-LEG-DEC');
+
+  console.log('[PASS] 9. FIFO queue keeps 15 newest finished orders and archives older ones in Facas Armazenadas');
 }
 
 async function runLiveSupabaseSmokeCheck() {

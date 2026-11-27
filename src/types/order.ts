@@ -180,6 +180,7 @@ export interface DieOrder {
   createdAt: string; // YYYY-MM-DD
   dueDate: string; // YYYY-MM-DD
   paidAt?: string;
+  completedAt?: string;
   financialNotes?: string;
 }
 

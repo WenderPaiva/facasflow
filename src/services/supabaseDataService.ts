@@ -82,6 +82,7 @@ function mapOrderRow(o: any): DieOrder {
     createdAt: createdDate,
     dueDate: String(o.data_vencimento || createdDate).slice(0, 10),
     paidAt: o.data_pagamento ? String(o.data_pagamento).slice(0, 10) : undefined,
+    completedAt: o.concluida_em ? String(o.concluida_em) : undefined,
     financialNotes: o.observacao_financeira || undefined,
   };
 }
@@ -828,6 +829,9 @@ export async function dbCreateOrder(
       version: 1,
       data_vencimento: dueDate,
       data_pagamento: paidAt,
+      ...(payload.stage === 'faca_pronta'
+        ? { concluida_em: new Date().toISOString() }
+        : {}),
       observacao_financeira: payload.financialNotes?.trim() || null,
     })
     .select('*')
@@ -882,6 +886,8 @@ export async function dbUpdateOrderFull(
   if (payload.stageChanged) {
     updateBody.etapa_atualizada_em = payload.stageUpdatedAt;
     updateBody.historico_etapas = payload.stageHistory;
+    updateBody.concluida_em =
+      payload.stage === 'faca_pronta' ? new Date().toISOString() : null;
   }
 
   const { data, error } = await sb
@@ -901,7 +907,7 @@ export async function dbMoveOrderStage(
   ordemUuid: string,
   targetStage: ProductionStage,
   stamp: string
-): Promise<{ version: number; updatedAt: string }> {
+): Promise<{ version: number; updatedAt: string; completedAt: string | null }> {
   const sb = getSupabaseClient();
   const { data, error } = await sb.rpc('mover_faca_v2', {
     p_ordem_id: ordemUuid,
@@ -912,6 +918,7 @@ export async function dbMoveOrderStage(
   return {
     version: Number(data?.version) || 1,
     updatedAt: data?.updated_at || new Date().toISOString(),
+    completedAt: data?.concluida_em ? String(data.concluida_em) : null,
   };
 }
 

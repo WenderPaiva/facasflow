@@ -961,3 +961,126 @@ export function resolveMonthPaymentDate(yearMonth: string, day: number): string 
   const safeDay = Math.min(maxDay, Math.max(1, Math.round(Number(day) || 1)));
   return `${yr}-${String(mo).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
 }
+
+export const MAX_RECENT_FINISHED_ORDERS = 15;
+
+const STAGE_STAMP_BR_REGEX = /^(\d{2})\/(\d{2})\s+às\s+(\d{2}):(\d{2})$/;
+
+function extractYearMonth(raw?: string): { year: number; month: number } | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  const isoMatch = /^(\d{4})-(\d{2})/.exec(trimmed);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    if (Number.isFinite(year) && year > 1970 && month >= 1 && month <= 12) {
+      return { year, month };
+    }
+  }
+  const parsed = Date.parse(trimmed);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    const dt = new Date(parsed);
+    return { year: dt.getUTCFullYear(), month: dt.getUTCMonth() + 1 };
+  }
+  return null;
+}
+
+export function getOrderCompletionTimestampMs(order: DieOrder): number {
+  if (order.completedAt) {
+    const parsedCompleted = Date.parse(order.completedAt);
+    if (Number.isFinite(parsedCompleted) && parsedCompleted > 0) {
+      return parsedCompleted;
+    }
+  }
+
+  const stampCandidates: string[] = [];
+  if (Array.isArray(order.stageHistory)) {
+    for (let i = order.stageHistory.length - 1; i >= 0; i -= 1) {
+      const entry = order.stageHistory[i];
+      if (entry?.stage === 'faca_pronta' && entry.timestamp) {
+        stampCandidates.push(String(entry.timestamp).trim());
+        break;
+      }
+    }
+  }
+  if (order.stageUpdatedAt) {
+    stampCandidates.push(String(order.stageUpdatedAt).trim());
+  }
+
+  for (const candidate of stampCandidates) {
+    const match = STAGE_STAMP_BR_REGEX.exec(candidate);
+    if (match) {
+      const day = Number(match[1]);
+      const month = Number(match[2]);
+      const hour = Number(match[3]);
+      const minute = Number(match[4]);
+
+      const createdYm = extractYearMonth(order.createdAt);
+      const updatedYm = extractYearMonth(order.updatedAt);
+      let year = createdYm?.year ?? updatedYm?.year ?? new Date().getUTCFullYear();
+
+      if (createdYm && month < createdYm.month) {
+        year += 1;
+      }
+
+      const utcMs = Date.UTC(year, month - 1, day, hour + 3, minute);
+      if (Number.isFinite(utcMs) && utcMs > 0) {
+        return utcMs;
+      }
+    } else if (/^\d{4}-\d{2}-\d{2}/.test(candidate)) {
+      const isoCand = Date.parse(candidate);
+      if (Number.isFinite(isoCand) && isoCand > 0) {
+        return isoCand;
+      }
+    }
+  }
+
+  const updatedParsed = order.updatedAt ? Date.parse(order.updatedAt) : NaN;
+  if (Number.isFinite(updatedParsed) && updatedParsed > 0) {
+    return updatedParsed;
+  }
+  const createdParsed = order.createdAt ? Date.parse(order.createdAt) : NaN;
+  if (Number.isFinite(createdParsed) && createdParsed > 0) {
+    return createdParsed;
+  }
+  return 0;
+}
+
+export function partitionFinishedOrders(
+  orders: DieOrder[],
+  limit: number = MAX_RECENT_FINISHED_ORDERS
+): {
+  allFinished: DieOrder[];
+  recentFinished: DieOrder[];
+  storedFinished: DieOrder[];
+} {
+  const safeLimit = Math.max(
+    0,
+    Math.floor(Number.isFinite(limit) ? limit : MAX_RECENT_FINISHED_ORDERS)
+  );
+  const finished = orders.filter((o) => o.stage === 'faca_pronta');
+  const completionTsMap = new Map<DieOrder, number>();
+  for (const order of finished) {
+    completionTsMap.set(order, getOrderCompletionTimestampMs(order));
+  }
+
+  const sorted = [...finished].sort((a, b) => {
+    const completionDiff =
+      (completionTsMap.get(b) ?? 0) - (completionTsMap.get(a) ?? 0);
+    if (completionDiff !== 0) return completionDiff;
+
+    const createdDiff =
+      (Date.parse(b.createdAt || '') || 0) - (Date.parse(a.createdAt || '') || 0);
+    if (createdDiff !== 0) return createdDiff;
+
+    const numB = parseInt(String(b.id).replace(/\D/g, ''), 10) || 0;
+    const numA = parseInt(String(a.id).replace(/\D/g, ''), 10) || 0;
+    return numB - numA;
+  });
+
+  return {
+    allFinished: sorted,
+    recentFinished: sorted.slice(0, safeLimit),
+    storedFinished: sorted.slice(safeLimit),
+  };
+}
